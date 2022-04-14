@@ -17,7 +17,7 @@ def construct_master_flat(path, kernel_size=49):
     
     # construct master flat after normalizing the individual flat frames
     print('Constructing the master flat...')
-    master_flat = np.zeros((fs.size, xpix*2, ypix))
+    master_flat = np.zeros((fs.size, 2, xpix, ypix))
     for i,f in enumerate(fs):
         # get flat frame and median-filtered+bias-subtracted flat frame
         frame_str = fs[0].split('.')[1]
@@ -27,18 +27,15 @@ def construct_master_flat(path, kernel_size=49):
         medhdu = fits.open(fsv2[1])
 
         # median-normalize the flat frame
-        master_flat[i,:xpix,:] = hdu[1].data / medhdu[1].data
-        master_flat[i,xpix:,:] = hdu[2].data / medhdu[2].data
-    
-    # modify the output header
-    hdu = fits.open(fs[0])
-    assert hdu[1].header['NAXIS2'] == xpix
-    hdu[1].header['NAXIS2'] = xpix*2
+        master_flat[i,0] = hdu[1].data / medhdu[1].data
+        master_flat[i,1] = hdu[2].data / medhdu[2].data
     
     # median combine each median-flattened flat to create the master flat
+    hdu = fits.open(fs[0])
     hdu0 = fits.PrimaryHDU(header=hdu[0].header)
-    hdu1 = fits.ImageHDU(np.nanmedian(master_flat,0), header=hdu[1].header)    
-    hdu = fits.HDUList([hdu0, hdu1])
+    hdu1 = fits.ImageHDU(np.nanmedian(master_flat[:,0],0), header=hdu[1].header)
+    hdu2 = fits.ImageHDU(np.nanmedian(master_flat[:,1],0), header=hdu[2].header)
+    hdu = fits.HDUList([hdu0, hdu1, hdu2])
     hdu.writeto('%s/MASTERFLAT_mednorm.fit'%path, overwrite=True)
     
     
