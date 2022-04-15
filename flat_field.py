@@ -84,9 +84,9 @@ def _median_filter_flats(path, kernel_size=49):
 
 def _edges_to_nan(hdu, img, fill_value=np.nan):
     # mask overscan (i.e. bias) and smear regions
-    xind = np.arange(hdu[1].header['NAXIS2'] - smear_width, hdu[1].header['NAXIS2'])
-    yind = np.append(np.arange(overscan_width), 
-                     np.arange(hdu[1].header['NAXIS1'] - overscan_width, hdu[1].header['NAXIS1']))
+    xind = np.arange(hdu[1].header['NAXIS2'] - cs.smear_width, hdu[1].header['NAXIS2'])
+    yind = np.append(np.arange(cs.overscan_width), 
+                     np.arange(hdu[1].header['NAXIS1'] - cs.overscan_width, hdu[1].header['NAXIS1']))
     img[xind] = fill_value
     img[:,yind] = fill_value
     return img
