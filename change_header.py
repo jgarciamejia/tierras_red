@@ -1,13 +1,15 @@
+#!/usr/bin/env python
+
 import numpy as np
 from astropy.io import fits 
 import sys
 from datetime import date
 import time
-import pdb; pdb.set_trace()
+import pdb#; pdb.set_trace()
 
-pdb.set_trace()
-todayy = today.strftime("%d/%m/%Y")
-print todayy
+#pdb.set_trace()
+todayy = date.today()
+todaysdate = todayy.strftime("%d/%m/%Y")
 currentepoch = 2022.26
 
 astra = '07:59:05.55'#sys.argv[1]
@@ -29,6 +31,6 @@ for ifile,fits_filename in enumerate(sys.argv[1:]):
         for hdu in f:
             hdu.header['CAT-RA']=astra
             hdu.header['CAT-DEC']=astdec
-            hdu.header['HISTORY']='{}: updated CAT-RA, CAT-DEC from epoch 2000 to epoch {} coords.'.format(todayy,currentepoch)
+            hdu.header['HISTORY']='{}: updated CAT-RA, CAT-DEC from epoch 2000 to epoch {} coords.'.format(todaysdate,currentepoch)
         print ('After Modification')
         print (hdu.header['CAT-RA'],hdu.header['CAT-DEC'])
