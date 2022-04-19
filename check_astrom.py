@@ -27,14 +27,15 @@ for ifile,fits_filename in enumerate(sys.argv[1:]):
     # and number of astrometric standards used. 
     stdcrms, numbrms = hdr['STDCRMS'], hdr['NUMBRMS']
     if stdcrms > maxrms:
-        print ('stdcrms > {}'.format(maxrms))
+        print ('stdcrms > {} for:'.format(maxrms))
         print (fits_filename,stdcrms)
     if numbrms < minnum:
-        print ('numbrms < {}'.format(minnum))
+        print ('numbrms < {} for:'.format(minnum))
         print (fits_filename,numbrms)
     stdcrms_lst = np.append(stdcrms_lst,stdcrms)
     numbrms_lst = np.append(numbrms_lst, numbrms)
-    #print ('done')
+print ('Astrom checks Done.')
+print ('If no filenames were printed above, astrom succesful on all files.')
 
 fig, (ax1,ax2) = plt.subplots(1,2,figsize=(14,7))
 fig.suptitle('Astrometry Evaluation')
@@ -47,7 +48,7 @@ ax2.hist(numbrms_lst, 20)
 ax2.set_ylabel('Number of Exposures')
 ax2.set_xlabel('Number of astrometric standards used')
 fig.savefig("{0}.{1}_astrom_hist.pdf".format(DATE,TARGET))
-
+plt.show()
 '''
 # Deprecated version of the loop above, to print how many files 
 # there are above or below a certain threshold value for stdcrms and numbrms
