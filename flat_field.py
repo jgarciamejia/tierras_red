@@ -4,14 +4,14 @@ from imports import *
 MAD = lambda x: np.median(abs(x-np.median(x)))
 
 
-def construct_master_flat(path, kernel_size=49, redo_medfilt=False):
+def construct_master_flat(path, kernel_size=49, redo_medfilt=False, Nflats=0):
     '''
     Construct median filtered flat frames, bias subtract them, and then 
     combine them to create a master flat for each chip on the Tierras detector. 
     '''
     # create and read-in median-filtered flat field images
     print('Median filtering the individual flat frames...')
-    kwargs = {'kernel_size': int(kernel_size), 'overwrite': bool(redo_medfilt)}
+    kwargs = {'kernel_size': int(kernel_size), 'overwrite': bool(redo_medfilt), 'Nflats':int(Nflats)}
     _median_filter_flats(path, **kwargs)
 
     fs = np.sort(glob.glob('%s/*FLAT*_medfilt_kernel%i*'%(path,kernel_size)))
@@ -42,7 +42,7 @@ def construct_master_flat(path, kernel_size=49, redo_medfilt=False):
     
     
     
-def _median_filter_flats(path, kernel_size=49, overwrite=False):
+def _median_filter_flats(path, kernel_size=49, Nflats=0, overwrite=False):
     '''
     Median filter each individual sky flat and save to a new fits file.
     '''
@@ -52,7 +52,8 @@ def _median_filter_flats(path, kernel_size=49, overwrite=False):
     kernel_size = int(kernel_size+1) if kernel_size % 2 == 0 else int(kernel_size)
     
     # median filter each flat frame
-    fs = np.sort(glob.glob('%s/*FLAT*'%path))
+    N = int(Nflats) if Nflats > 0 else 1000
+    fs = np.sort(glob.glob('%s/*FLAT*'%path))[:N]
     for i,f in enumerate(fs):
         
         if ('medfilt' in f) | ('MASTER' in f):
@@ -145,9 +146,11 @@ def _derive_bias_value(path, verbose=True):
 
 if __name__ == '__main__':
     path = sys.argv[1]
-    kernel_size = int(sys.argv[2]) if len(sys.argv) > 2 else 49
+    Nflats = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    kernel_size = int(sys.argv[3]) if len(sys.argv) > 3 else 49
 
     kwargs = {'kernel_size': kernel_size,
+              'Nflats': Nflats,
               'redo_medfilt': False}
 
     construct_master_flat(path, **kwargs)
