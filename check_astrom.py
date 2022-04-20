@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+# To use, pass the script: maxSTDCRMS minNUMBRMS filenames 
+
 import numpy as np
 from astropy.io import fits 
 import sys
@@ -8,18 +10,18 @@ import re
 
 print ('Checking astrometric solution on plate solved files...')
 
-sample_filename = sys.argv[1]
+sample_filename = sys.argv[3]
 DATE = re.split('\.',sample_filename)[0]
 TARGET = re.split('\.', sample_filename)[2]
 
 nfiles = len(sys.argv[1:])
 nstdcrms, nnumbrms = 0,0
-maxrms, minnum = 0.14,100
+maxrms, minnum = sys.argv[1],sys.argv[2]
 
 stdcrms_lst = np.array([])
 numbrms_lst = np.array([])
 
-for ifile,fits_filename in enumerate(sys.argv[1:]):
+for ifile,fits_filename in enumerate(sys.argv[3:]):
     #print (fits_filename)
     hdr = fits.getheader(fits_filename,1)
     #print (fits_filename)
