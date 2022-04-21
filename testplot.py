@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-To use, pass code targetname, obsdate, savefig=True/False, and lcx.txt files
+To use, pass code <script> targetname obsdate [savefig=]True/False idealapsize(pix) lcx.txt files
 '''
 
 from __future__ import print_function
@@ -21,7 +21,7 @@ from poly import *
 decimal_to_ppm = (10)**6
 
 #User-input 
-idealap = 14.0 #pixel
+idealap = float(sys.argv[4]) #pixel
 idealbinsize = 3.0 #mins
 
 #nap = len(sys.argv[1:])
@@ -32,7 +32,7 @@ idealbinsize = 3.0 #mins
 targname = sys.argv[1]
 obsdate = sys.argv[2]
 savefig = sys.argv[3] #must be True or False
-n = 4
+n = 5
 nap = len(sys.argv[n:])
 apsize = numpy.empty([nap])
 binsize = numpy.linspace(0.2, 10, 50)
@@ -144,7 +144,7 @@ for iap, filename in enumerate(sys.argv[n:]):
       plt.ylabel("Normalized flux")
 
       plt.xlim(mjd[0]*24, mjd[-1]*24)
-      plt.ylim(0.991, 1.009)
+      #plt.ylim(0.991, 1.009)
 
       plt.legend()
 
@@ -195,16 +195,16 @@ plt.legend()
 
 #
 # add secondary axis
-Rp_per_Rsun = 109.0763707
-M3_radius = 0.3 # estimate to improve
-x_sigma = 1
+#Rp_per_Rsun = 109.0763707
+#M3_radius = 0.3 # estimate to improve
+#x_sigma = 1
 # Convert y1 to y2
-P_REarth = lambda P_ppm: numpy.sqrt(x_sigma*P_ppm/decimal_to_ppm) * M3_radius * Rp_per_Rsun
+#P_REarth = lambda P_ppm: numpy.sqrt(x_sigma*P_ppm/decimal_to_ppm) * M3_radius * Rp_per_Rsun
 # Convert y2 to y1
-P_ppm = lambda P_REarth: (1/x_sigma)*(P_REarth/(M3_radius * Rp_per_Rsun))**2
-ax2 = ax.secondary_yaxis("right", functions=(P_REarth, P_ppm))
+#P_ppm = lambda P_REarth: (1/x_sigma)*(P_REarth/(M3_radius * Rp_per_Rsun))**2
+#ax2 = ax.secondary_yaxis("right", functions=(P_REarth, P_ppm))
 #ax2.set_ylabel(r"Photometric Precision Required for ${}\sigma$ Detection (Earth radii)".format(x_sigma), wrap=True)
-ax2.set_ylabel(r"Earth radii".format(x_sigma), wrap=True)
+#ax2.set_ylabel(r"Earth radii".format(x_sigma), wrap=True)
 #ax2.tick_params(direction='in', length=6, width=3, colors='black')
 # 
 
