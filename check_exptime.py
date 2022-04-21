@@ -11,8 +11,8 @@ sample_filename = sys.argv[1]
 DATE = re.split('\.',sample_filename)[0]
 TARGET = re.split('\.', sample_filename)[2]
 
-desired_exptime = 60.0
-print ('Desired exp time = {0} sec.'.format(desired_exptime))
+#desired_exptime = 60.0
+#print ('Desired exp time = {0} sec.'.format(desired_exptime))
 
 #nfiles = len(sys.argv[1:])
 exptimes = np.array([])
@@ -25,11 +25,13 @@ for ifile,fits_filename in enumerate(sys.argv[1:]):
     hdr = fits.getheader(fits_filename,0)
     file_exptime = hdr['EXPTIME']
     exptimes = np.append(exptimes, file_exptime)
-    if file_exptime != desired_exptime:
-        print ('{0} has exp time = {1} sec'.format(fits_filename,file_exptime))
+    #if file_exptime != desired_exptime:
+    #    print ('{0} has exp time = {1} sec'.format(fits_filename,file_exptime))
 if np.all(exptimes == exptimes[0]):
     print ('All files in the stack have the same exposure time')
-
+elif not np.all(exptimes == exptimes[0]):
+    print ('Files in the stack have different exposure times')
+    
 fig = plt.figure()
 ax = fig.add_axes([0.1,0.1,.6,.75])
 
