@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+# to use, pass command line <script.py> astra astdec filenames 
+# astra 00:00:00, astdec +/-00:00:00
 import numpy as np
 from astropy.io import fits 
 import sys
@@ -10,16 +12,18 @@ import pdb#; pdb.set_trace()
 #pdb.set_trace()
 todayy = date.today()
 todaysdate = todayy.strftime("%d/%m/%Y")
-currentepoch = 2022.26
 
-astra = '07:59:05.55'#sys.argv[1]
-astdec = '+15:23:28.0'#sys.argv[2]
+# assumes data reduced on same day or day after they were taken
+currentepoch = 2000.0 + (time.time() / 86400.0 - 10957.5) / 365.25
+
+astra = sys.argv[1]
+astdec = sys.argv[2]
 
 #sys.argv[1] = astra # in h,min,sec
 #sys.argv[2] = astde # in deg,min,sec
 
 nfiles = len(sys.argv[1:])
-for ifile,fits_filename in enumerate(sys.argv[1:]):
+for ifile,fits_filename in enumerate(sys.argv[3:]):
     #fits.info(fits_filename)
     #pdb.set_trace()
     print (fits_filename)
