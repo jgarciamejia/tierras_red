@@ -137,9 +137,9 @@ if True:
     print("Selected {0:d} reference stars".format(len(refs)))
     # For now, exclude variable refs by hand
     oldnrefs = len(refs)
-    refs = numpy.delete(refs,[5])
+    #refs = numpy.delete(refs,[5])
     #pdb.set_trace()
-    print("Excluded {0:d} reference stars by hand".format(oldnrefs-len(refs)))
+    #print("Excluded {0:d} reference stars by hand".format(oldnrefs-len(refs)))
     
     # Array of positions to do photometry at.
     xphot = numpy.concatenate(([targ["x"]], refs["x"]))+1
