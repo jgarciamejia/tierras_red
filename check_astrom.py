@@ -16,7 +16,7 @@ TARGET = re.split('\.', sample_filename)[2]
 
 nfiles = len(sys.argv[1:])
 nstdcrms, nnumbrms = 0,0
-maxrms, minnum = sys.argv[1],sys.argv[2]
+maxrms, minnum = float(sys.argv[1]),float(sys.argv[2])
 
 stdcrms_lst = np.array([])
 numbrms_lst = np.array([])
