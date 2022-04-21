@@ -1,8 +1,8 @@
+#!/usr/bin/env python
+
 from imports import *
 
-
 MAD = lambda x: np.median(abs(x-np.median(x)))
-
 
 def construct_master_flat(path, kernel_size=49, redo_medfilt=False, Nflats=0):
     '''
@@ -12,7 +12,7 @@ def construct_master_flat(path, kernel_size=49, redo_medfilt=False, Nflats=0):
     # create and read-in median-filtered flat field images
     print('Median filtering the individual flat frames...')
     kwargs = {'kernel_size': int(kernel_size), 'overwrite': bool(redo_medfilt), 'Nflats':int(Nflats)}
-    _median_filter_flats(path, **kwargs)
+    #_median_filter_flats(path, **kwargs)   #TEMP
 
     fs = np.sort(glob.glob('%s/*FLAT*_medfilt_kernel%i*'%(path,kernel_size)))
     assert fs.size > 0
@@ -22,7 +22,7 @@ def construct_master_flat(path, kernel_size=49, redo_medfilt=False, Nflats=0):
     master_flat = np.zeros((fs.size, 2, cs.xpix, cs.ypix))
     for i,f in enumerate(fs):
         # get flat frame and median-filtered+bias-subtracted flat frame
-        frame_str = fs[0].split('.')[1]
+        frame_str = fs[0].split('.FLAT')[0].split('.')[-1]
         fsv2 = np.sort(glob.glob('%s/*%s.FLAT*fit'%(path,frame_str)))
         assert fsv2.size == 2
         hdu = fits.open(fsv2[0])
