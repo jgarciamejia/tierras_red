@@ -14,7 +14,7 @@ sample_filename = sys.argv[3]
 DATE = re.split('\.',sample_filename)[0]
 TARGET = re.split('\.', sample_filename)[2]
 
-nfiles = len(sys.argv[1:])
+nfiles = len(sys.argv[3:])
 nstdcrms, nnumbrms = 0,0
 maxrms, minnum = float(sys.argv[1]),float(sys.argv[2])
 
@@ -23,7 +23,12 @@ numbrms_lst = np.array([])
 
 for ifile,fits_filename in enumerate(sys.argv[3:]):
     #print (fits_filename)
-    hdr = fits.getheader(fits_filename,1)
+    if '_red' in fits_filename:
+        #print ('reduced image')
+        hdr_ind = 0 # 0 if image passed through imred, 1 if not
+    elif '_red' not in fits_filename:
+        hdr_ind = 1
+    hdr = fits.getheader(fits_filename,hdr_ind)
     #print (fits_filename)
     # read out astrometric fit coordinate rms (arcsec)
     # and number of astrometric standards used. 
@@ -36,6 +41,7 @@ for ifile,fits_filename in enumerate(sys.argv[3:]):
         print (fits_filename,numbrms)
     stdcrms_lst = np.append(stdcrms_lst,stdcrms)
     numbrms_lst = np.append(numbrms_lst, numbrms)
+    #print ('{} DONE'.format(fits_filename))
 print ('Astrom checks Done.')
 print ('If no filenames were printed above, astrom succesful on all files.')
 
