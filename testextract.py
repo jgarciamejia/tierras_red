@@ -16,7 +16,10 @@ except ImportError:
   import pywcs
 
 from imred import *
-import pdb
+#import imred
+#import pdb
+#pdb.set_trace()
+
 
 # Deal with the command line.
 ap = argparse.ArgumentParser()
@@ -122,8 +125,8 @@ if True:
     targ = objs[itarg]
     
     # Select reference stars.
-    ww = numpy.logical_and(objs["peak"] < 20000,
-                           objs["flux"] > targ["flux"]/10)
+    ww = numpy.logical_and(objs["peak"] < 50000,
+                           objs["flux"] > targ["flux"]/20)
     ww[itarg] = 0  # deselect target
     
     possible_refs = objs[ww]
