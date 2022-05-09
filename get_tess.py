@@ -42,10 +42,11 @@ def get_tess_LC(ticid, sector, outdir='/Users/ryancloutier/Downloads',
     url,_ = tic_data_url(ticid, sector)
     fs = listFD(url, ext='lc.fits')
     print('URL (%s) contains %i light curve files.'%(url, len(fs)))
-    bjd, f, ef = np.zeros(0), np.zeros(0), np.zeros(0)
+    bjd, f, ef, sectors = np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0)
     for fi in fs:
         os.system('wget %s'%fi)
         os.system('mv %s %s'%(fi.split('//')[-1], outdir))
+
         # read-in data
         hdr = fits.open('%s/%s'%(outdir, fi.split('//')[-1]))
         bjd = np.append(bjd, hdr[1].data['TIME'])
@@ -56,10 +57,13 @@ def get_tess_LC(ticid, sector, outdir='/Users/ryancloutier/Downloads',
         ef = np.append(ef, hdr[1].data['%s_FLUX_ERR'%label] / np.nanmedian(ftmp))
         f = np.append(f, ftmp / np.nanmedian(ftmp))
 
+        # save sector
+        sectors = np.append(sectors, np.repeat(int(fi.split('/s')[1].split('/')[0]), ftmp.size))        
+        
     # clean and sort the data
     g = np.isfinite(bjd) & np.isfinite(f) & np.isfinite(ef)
     s = np.argsort(bjd[g])
-    bjd, f, ef = bjd[g][s], f[g][s], ef[g][s]
+    bjd, f, ef, sectors = bjd[g][s], f[g][s], ef[g][s], sectors[g][s]
 
     # plot if desired
     if pltt:
@@ -67,4 +71,4 @@ def get_tess_LC(ticid, sector, outdir='/Users/ryancloutier/Downloads',
         plt.xlabel('BJD - 2457000', fontsize=12)
         plt.ylabel('Normalized flux', fontsize=12)
         
-    return bjd, f, ef
+    return bjd, f, ef, sectors
