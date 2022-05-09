@@ -12,7 +12,7 @@ def construct_master_flat(path, kernel_size=49, redo_medfilt=False, Nflats=0):
     # create and read-in median-filtered flat field images
     print('Median filtering the individual flat frames...')
     kwargs = {'kernel_size': int(kernel_size), 'overwrite': bool(redo_medfilt), 'Nflats':int(Nflats)}
-    #_median_filter_flats(path, **kwargs)   #TEMP
+    _median_filter_flats(path, **kwargs)
 
     fs = np.sort(glob.glob('%s/*FLAT*_medfilt_kernel%i*'%(path,kernel_size)))
     assert fs.size > 0
@@ -48,12 +48,14 @@ def _median_filter_flats(path, kernel_size=49, Nflats=0, overwrite=False):
     '''
     # get each chip's scalar bias value
     _,bias1,bias2 = _derive_bias_value(path, verbose=False)
+    assert np.all(np.isfinite([bias1,bias2]))
 
     kernel_size = int(kernel_size+1) if kernel_size % 2 == 0 else int(kernel_size)
     
     # median filter each flat frame
     N = int(Nflats) if Nflats > 0 else 1000
     fs = np.sort(glob.glob('%s/*FLAT*'%path))[:N]
+    assert fs.size > 0
     for i,f in enumerate(fs):
         
         if ('medfilt' in f) | ('MASTER' in f):
@@ -116,20 +118,34 @@ def _trim_edges(img):
         
 ## get bias value from the bias frames (or from the overscan regions) 
 # http://slittlefair.staff.shef.ac.uk/teaching/phy217/lectures/instruments/L12/index.html
-def _derive_bias_value(path, verbose=True):
+def _derive_bias_value(path, verbose=True, bias_frame=False):
     '''
     Calculate the scalar bias value by averaging the nightly BIAS frames. 
     '''
-    
-    fs = np.sort(glob.glob('%s/*BIAS*'%path))
-    
-    out = np.zeros((fs.size,2,4))
+    if bias_frame:
+        fs = np.sort(glob.glob('%s/*BIAS*'%path))
+    else:
+        fstmp = np.sort(glob.glob('%s/*fit'%path))
+        fs = []
+        for i,f in enumerate(fstmp):
+            if 'BIAS' not in f and \
+               'FLAT' not in f and \
+               'DARK' not in f and \
+               len(fits.open(f)) == 3: 
+                fs.append(f)
+                break
+
+    out = np.zeros((len(fs),2,4))
     for i,f in enumerate(fs):
         hdu = fits.open(f)
                 
+        # get image
+        img1 = hdu[1].data if bias_frame else np.append(hdu[1].data[:,:cs.overscan_width], hdu[1].data[:,-cs.overscan_width:])
+        img2 = hdu[2].data if bias_frame else np.append(hdu[2].data[:,:cs.overscan_width], hdu[2].data[:,-cs.overscan_width:])
+
         # save stats
-        out[i,0,:] = hdu[1].data.mean(), hdu[1].data.std(), np.median(hdu[1].data), MAD(hdu[1].data)
-        out[i,1,:] = hdu[2].data.mean(), hdu[2].data.std(), np.median(hdu[2].data), MAD(hdu[2].data)
+        out[i,0,:] = img1.mean(), img1.std(), np.median(img1), MAD(img1)
+        out[i,1,:] = img2.mean(), img2.std(), np.median(img2), MAD(img2)
         
         if verbose:
             print('File: %s'%f)
