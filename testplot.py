@@ -154,7 +154,7 @@ for iap, filename in enumerate(sys.argv[n:]):
 
       plt.gca().xaxis.set_visible(False)
       plt.gca().yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter("%.2f"))
-
+      plt.ylim(1,3)
       plt.ylabel("Seeing (\")")
 
       plt.subplot(gslc[2], sharex=figlc)
