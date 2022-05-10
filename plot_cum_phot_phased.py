@@ -84,6 +84,10 @@ print ('Cumulative uncertainties, today')
 print (t0s_c_perr[future_ind[0]], t0s_c_merr[future_ind[0]]) #days
 #print (t0s_c_perr[future_ind[0]]*24*60, t0s_c_merr[future_ind[0]]*24*60) #minutes
 
+###### TOI 2013 TESS Data
+
+
+
 ###### TOI 2013 Tierras Data
 #### PLOT Phase-folded light curve
 
