@@ -102,4 +102,4 @@ ax2.set_xlabel("Time (JD - 2457000)", size=15, color = 'black')
 fig.text(0.07,0.48, "Normalized flux", size=15, ha='center', va = 'center', rotation = 'vertical')
 
 plt.show()
-
+fig.savefig('TOI2013_plot_cum_phot.pdf')
