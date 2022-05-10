@@ -34,21 +34,20 @@ fig, (ax1,ax2) = plt.subplots(2,1, sharex = True, figsize=(15,5), gridspec_kw={'
 ax1.grid(linestyle='dashed', linewidth=2, alpha=0.6)
 
 # Date array 
-obsdates = ['20220504','20220505','20220506', '20220507']
+obsdates = ['20220504','20220505','20220506', '20220507', '20220508']
 for date in obsdates:
 	path = '/Users/jgarciamejia/Documents/TierrasProject/SCIENCE/AIJ_Output_Ryan/TOI2013_'+date+'/'
 	print (path)
 	try:
-		data = pd.read_table(path+'toi2013_'+date+'-Tierras_1m2-I_measurements.xls')
+		df = pd.read_table(path+'toi2013_'+date+'-Tierras_1m2-I_measurements.xls')
 	except FileNotFoundError:
-		data = pd.read_table(path+'toi2013_'+date+'-Tierras_1m3-I_measurements.xls')
+		df = pd.read_table(path+'toi2013_'+date+'-Tierras_1m3-I_measurements.xls')
 	#pdb.set_trace()
-	data_np = pd.DataFrame.to_numpy(data)
-	jds = data_np[:,4] # - data_np[0,4]
+	jds = df['J.D.-2400000'].to_numpy() 
 	jds -= (2457000-2400000) 
-	rel_flux = data_np[:,20]
-	rel_flux_err = data_np[:,42]
-	airmass = data_np[:,9]
+	rel_flux = df['rel_flux_T1'].to_numpy() 
+	rel_flux_err = df['rel_flux_err_T1'].to_numpy()
+	airmass = df['AIRMASS'].to_numpy()
 
 	# Median-normalize relative flux
 	rel_flux /= np.median(rel_flux)
@@ -79,12 +78,14 @@ for date in obsdates:
 	binned_flux = ybn[wb] / ybd[wb]
 	x = 0.5*(bins[0:-1] + bins[1:])
 	x = x[wb]
+	print ('flux binned')
+	#pdb.set_trace()
 
 	ax1.scatter(jds, rel_flux, s=2, color='seagreen')
 	#ax1.errorbar(jds, rel_flux, rel_flux_err, fmt='none',capsize = 3.5, color='seagreen', alpha = 0.8)
 	ax2.scatter(x[0:-1], binned_flux[0:-1], s=20, color='darkgreen', alpha = 0.9)
 
-
+pdb.set_trace()
 # Config grid+ticks
 ax1.tick_params(direction='in', length=4, width=2)
 ax2.grid(linestyle='dashed', linewidth=2, alpha=0.6)
