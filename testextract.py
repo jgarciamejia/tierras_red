@@ -17,7 +17,7 @@ except ImportError:
 
 from imred import *
 #import imred
-#import pdb
+import pdb
 #pdb.set_trace()
 
 
@@ -125,8 +125,8 @@ if True:
     targ = objs[itarg]
     
     # Select reference stars.
-    ww = numpy.logical_and(objs["peak"] < 50000,
-                           objs["flux"] > targ["flux"]/20)
+    ww = numpy.logical_and(objs["peak"] < 20000,
+                           objs["flux"] > targ["flux"]/10)
     ww[itarg] = 0  # deselect target
     
     possible_refs = objs[ww]
@@ -140,9 +140,9 @@ if True:
     print("Selected {0:d} reference stars".format(len(refs)))
     # For now, exclude variable refs by hand
     oldnrefs = len(refs)
-    #refs = numpy.delete(refs,[5])
+    refs = numpy.delete(refs,[7])
     #pdb.set_trace()
-    #print("Excluded {0:d} reference stars by hand".format(oldnrefs-len(refs)))
+    print("Excluded {0:d} reference stars by hand".format(oldnrefs-len(refs)))
     
     # Array of positions to do photometry at.
     xphot = numpy.concatenate(([targ["x"]], refs["x"]))+1
