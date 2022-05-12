@@ -11,6 +11,10 @@ import pandas as pd
 import numpy as np
 import math
 
+# Date array 
+obsdates = ['20220504','20220505','20220506', '20220507', '20220508',
+'20220509']
+
 # Handy function
 def medsig(a):
   median = np.median(a)
@@ -23,7 +27,6 @@ DIAM = 1300
 HEIGHT = 2345
 texp = 30 #seconds
 
-
 # Set up plot
 plt.rcParams.update({'font.size':12})
 plt.rcParams['axes.linewidth'] = 2
@@ -33,8 +36,6 @@ fig, (ax1,ax2) = plt.subplots(2,1, sharex = True, figsize=(15,5), gridspec_kw={'
 # Light Curve
 ax1.grid(linestyle='dashed', linewidth=2, alpha=0.6)
 
-# Date array 
-obsdates = ['20220504','20220505','20220506', '20220507', '20220508']
 for date in obsdates:
 	path = '/Users/jgarciamejia/Documents/TierrasProject/SCIENCE/AIJ_Output_Ryan/TOI2013_'+date+'/'
 	print (path)
@@ -85,7 +86,7 @@ for date in obsdates:
 	#ax1.errorbar(jds, rel_flux, rel_flux_err, fmt='none',capsize = 3.5, color='seagreen', alpha = 0.8)
 	ax2.scatter(x[0:-1], binned_flux[0:-1], s=20, color='darkgreen', alpha = 0.9)
 
-pdb.set_trace()
+#pdb.set_trace()
 # Config grid+ticks
 ax1.tick_params(direction='in', length=4, width=2)
 ax2.grid(linestyle='dashed', linewidth=2, alpha=0.6)
@@ -102,4 +103,4 @@ ax2.set_xlabel("Time (JD - 2457000)", size=15, color = 'black')
 fig.text(0.07,0.48, "Normalized flux", size=15, ha='center', va = 'center', rotation = 'vertical')
 
 plt.show()
-fig.savefig('TOI2013_plot_cum_phot.pdf')
+#fig.savefig('TOI2013_plot_cum_phot.pdf')
