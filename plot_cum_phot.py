@@ -12,8 +12,8 @@ import numpy as np
 import math
 
 # Date array 
-obsdates = ['20220504','20220505','20220506', '20220507', '20220508',
-'20220509']
+obsdates = ['20220505','20220506', '20220507', '20220508',
+'20220509', '20220510', '20220511']
 
 # Handy function
 def medsig(a):
@@ -51,7 +51,7 @@ for date in obsdates:
 	airmass = df['AIRMASS'].to_numpy()
 
 	# Median-normalize relative flux
-	rel_flux /= np.median(rel_flux)
+	#rel_flux /= np.median(rel_flux)
 	#rel_flux_err /= np.median(rel_flux_err)
 
 	# Flag outliers 
@@ -82,7 +82,7 @@ for date in obsdates:
 	print ('flux binned')
 	#pdb.set_trace()
 
-	ax1.scatter(jds, rel_flux, s=2, color='seagreen')
+	ax1.scatter(jds, rel_flux/.256, s=2, color='seagreen')
 	#ax1.errorbar(jds, rel_flux, rel_flux_err, fmt='none',capsize = 3.5, color='seagreen', alpha = 0.8)
 	ax2.scatter(x[0:-1], binned_flux[0:-1], s=20, color='darkgreen', alpha = 0.9)
 
