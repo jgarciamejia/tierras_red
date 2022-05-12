@@ -1,17 +1,22 @@
 #!/usr/bin/env python
+# TO run, apss the following to the command line: 
+# script path N 1(0)
+# path: full path to flats 
+# N: number of flats to median filter and combine
+# 1(0): type 1 to use evening set of flats, 0 to use mornign set of flats 
 
 from imports import *
 
 MAD = lambda x: np.median(abs(x-np.median(x)))
 
-def construct_master_flat(path, kernel_size=49, redo_medfilt=False, Nflats=0):
+def construct_master_flat(path, kernel_size=49, redo_medfilt=False, Nflats=0, evening=True):
     '''
     Construct median filtered flat frames, bias subtract them, and then 
     combine them to create a master flat for each chip on the Tierras detector. 
     '''
     # create and read-in median-filtered flat field images
     print('Median filtering the individual flat frames...')
-    kwargs = {'kernel_size': int(kernel_size), 'overwrite': bool(redo_medfilt), 'Nflats':int(Nflats)}
+    kwargs = {'kernel_size': int(kernel_size), 'overwrite': bool(redo_medfilt), 'Nflats':int(Nflats), 'evening': bool(evening)}
     _median_filter_flats(path, **kwargs)
 
     fs = np.sort(glob.glob('%s/*FLAT*_medfilt_kernel%i*'%(path,kernel_size)))
@@ -42,7 +47,7 @@ def construct_master_flat(path, kernel_size=49, redo_medfilt=False, Nflats=0):
     
     
     
-def _median_filter_flats(path, kernel_size=49, Nflats=0, overwrite=False):
+def _median_filter_flats(path, kernel_size=49, Nflats=0, evening=True, overwrite=False):
     '''
     Median filter each individual sky flat and save to a new fits file.
     '''
@@ -53,8 +58,10 @@ def _median_filter_flats(path, kernel_size=49, Nflats=0, overwrite=False):
     kernel_size = int(kernel_size+1) if kernel_size % 2 == 0 else int(kernel_size)
     
     # median filter each flat frame
-    N = int(Nflats) if Nflats > 0 else 1000
-    fs = np.sort(glob.glob('%s/*FLAT*'%path))[:N]
+    #N = int(Nflats) if Nflats > 0 else 1000
+    #fs = np.sort(glob.glob('%s/*FLAT*'%path))[:N]
+    inds = _get_flat_indices(path, Nflats, evening)
+    fs = np.sort(glob.glob('%s/*FLAT*'%path))[inds]
     assert fs.size > 0
     for i,f in enumerate(fs):
         
@@ -89,6 +96,19 @@ def _median_filter_flats(path, kernel_size=49, Nflats=0, overwrite=False):
                 hdu = fits.HDUList([hdu0, hdu1, hdu2])
                 hdu.writeto(fout, overwrite=True)
                 
+
+
+def _get_flat_indices(path, N, evening=True):
+    fs = np.sort(glob.glob('%s/*FLAT*'%path))
+    file_inds = []
+    for i,f in enumerate(fs):
+        if ('medfilt' in f) | ('MASTER' in f):
+            continue
+        file_inds.append(int(f.split('.')[1]))
+    
+    start = 0 if evening else np.where(np.diff(file_inds) > 1)[0][0]+1
+    return range(start, start+N)
+
 
 
 def _add_nan_edges(img_trimmed, fill_value=np.nan):
@@ -163,10 +183,12 @@ def _derive_bias_value(path, verbose=True, bias_frame=False):
 if __name__ == '__main__':
     path = sys.argv[1]
     Nflats = int(sys.argv[2]) if len(sys.argv) > 2 else 0
-    kernel_size = int(sys.argv[3]) if len(sys.argv) > 3 else 49
+    evening = bool(int(sys.argv[3])) if len(sys.argv) > 3 else True
+    kernel_size = int(sys.argv[4]) if len(sys.argv) > 4 else 49
 
     kwargs = {'kernel_size': kernel_size,
               'Nflats': Nflats,
+              'evening': evening,
               'redo_medfilt': False}
-
+     
     construct_master_flat(path, **kwargs)
