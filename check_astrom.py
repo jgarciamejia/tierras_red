@@ -7,6 +7,7 @@ from astropy.io import fits
 import sys
 import matplotlib.pyplot as plt
 import re
+import pdb
 
 print ('Checking astrometric solution on plate solved files...')
 
@@ -20,6 +21,8 @@ maxrms, minnum = float(sys.argv[1]),float(sys.argv[2])
 
 stdcrms_lst = np.array([])
 numbrms_lst = np.array([])
+
+flagged_files = np.array([])
 
 for ifile,fits_filename in enumerate(sys.argv[3:]):
     #print (fits_filename)
@@ -36,12 +39,21 @@ for ifile,fits_filename in enumerate(sys.argv[3:]):
     if stdcrms > maxrms:
         print ('stdcrms > {} for:'.format(maxrms))
         print (fits_filename,stdcrms)
+        if fits_filename not in flagged_files:
+            flagged_files = np.append(flagged_files, fits_filename)
     if numbrms < minnum:
         print ('numbrms < {} for:'.format(minnum))
         print (fits_filename,numbrms)
+        if fits_filename not in flagged_files:
+            flagged_files = np.append(flagged_files, fits_filename)
+
     stdcrms_lst = np.append(stdcrms_lst,stdcrms)
     numbrms_lst = np.append(numbrms_lst, numbrms)
     #print ('{} DONE'.format(fits_filename))
+print (flagged_files)
+pdb.set_trace()
+np.savetxt('{}.{}.flagged_files.txt'.format(DATE,TARGET),flagged_files,fmt='%s')
+
 print ('Astrom checks Done.')
 print ('If no filenames were printed above, astrom succesful on all files.')
 
