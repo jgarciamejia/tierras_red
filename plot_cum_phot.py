@@ -10,9 +10,18 @@ from matplotlib.ticker import FormatStrFormatter
 import pandas as pd
 import numpy as np
 import math
+from bin_lc import bin_lc_binsize
+
+# Normalization per night
+# if true, data median-normalized per night. 
+# If false, all fluxes saved and global normalization carried out 
+norm_each_night = False 
+# Global normalization: can only be done if norm_each_night = False.
+# However, if both are set to false, code prints unnormalized data
+norm_globally = False
 
 # Date array 
-obsdates = ['20220505','20220506', '20220507', '20220508',
+obsdates = ['20220504','20220505','20220506', '20220507', '20220508',
 '20220509', '20220510', '20220511']
 
 # Handy function
@@ -36,6 +45,10 @@ fig, (ax1,ax2) = plt.subplots(2,1, sharex = True, figsize=(15,5), gridspec_kw={'
 # Light Curve
 ax1.grid(linestyle='dashed', linewidth=2, alpha=0.6)
 
+# Initialize array to hold all rel fluxes
+glob_jds = np.array([])
+glob_rel_flux = np.array([])
+
 for date in obsdates:
 	path = '/Users/jgarciamejia/Documents/TierrasProject/SCIENCE/AIJ_Output_Ryan/TOI2013_'+date+'/'
 	print (path)
@@ -49,10 +62,6 @@ for date in obsdates:
 	rel_flux = df['rel_flux_T1'].to_numpy() 
 	rel_flux_err = df['rel_flux_err_T1'].to_numpy()
 	airmass = df['AIRMASS'].to_numpy()
-
-	# Median-normalize relative flux
-	#rel_flux /= np.median(rel_flux)
-	#rel_flux_err /= np.median(rel_flux_err)
 
 	# Flag outliers 
 	medflux, sigflux = medsig (rel_flux)
@@ -70,24 +79,30 @@ for date in obsdates:
 
 	# Bin the light curve 
 	binsize = 10.0 #mins
-	nbin = (jds[-1] - jds[0])*24*60 / binsize 
-	bins = jds[0] + binsize * np.arange(nbin+1) / (24*60) #*
-	wt = 1.0 / (np.square(rel_flux_err))
-	ybn = np.histogram(jds, bins=bins, weights = rel_flux*wt)[0]
-	ybd = np.histogram(jds, bins=bins, weights = wt)[0]
-	wb = ybd > 0 
-	binned_flux = ybn[wb] / ybd[wb]
-	x = 0.5*(bins[0:-1] + bins[1:])
-	x = x[wb]
-	print ('flux binned')
-	#pdb.set_trace()
+	xbin, binned_flux, bins = bin_lc_binsize(jds, rel_flux, binsize)
 
-	ax1.scatter(jds, rel_flux/.256, s=2, color='seagreen')
-	#ax1.errorbar(jds, rel_flux, rel_flux_err, fmt='none',capsize = 3.5, color='seagreen', alpha = 0.8)
-	ax2.scatter(x[0:-1], binned_flux[0:-1], s=20, color='darkgreen', alpha = 0.9)
+	if norm_each_night: 
+		# Median-normalize relative flux per night
+		rel_flux /= np.median(rel_flux)
+		# Plot 
+		for i,line in enumerate(bins):
+			ax1.scatter(jds, rel_flux, s=2, color='seagreen')
+			#ax1.errorbar(jds, rel_flux, rel_flux_err, fmt='none',capsize = 3.5, color='seagreen', alpha = 0.8)
+			ax2.scatter(xbin, binned_flux, s=20, color='darkgreen', alpha = 0.9)
+	elif not norm_each_night:
+		glob_rel_flux = np.append(glob_rel_flux, rel_flux)
+		glob_jds = np.append(glob_jds, jds)
 
-#pdb.set_trace()
-# Config grid+ticks
+if not norm_each_night:
+		if norm_globally:
+			glob_rel_flux /= np.median(glob_rel_flux)
+		ax1.scatter(glob_jds, glob_rel_flux, s=2, color='seagreen')
+		binsize = 10.0 #mins
+		glob_xbin, glob_binned_flux, glob_bins = bin_lc_binsize(glob_jds, glob_rel_flux, binsize)
+		ax2.scatter(glob_xbin, glob_binned_flux, s=20, color='darkgreen', alpha = 0.9)
+
+
+# Config plot grid+ticks
 ax1.tick_params(direction='in', length=4, width=2)
 ax2.grid(linestyle='dashed', linewidth=2, alpha=0.6)
 #ax2.set_yticks([0.9985, 0.9990, 0.9995, 1.0000, 1.0005, 1.0010, 1.0015])
@@ -96,8 +111,14 @@ ax2.grid(linestyle='dashed', linewidth=2, alpha=0.6)
 ax2.tick_params(direction='in', length=4, width=2)
 ax2.get_xaxis().get_major_formatter().set_useOffset(False)
 
-# Config plot labels
-ax1.set_title('Bin size = {} min'.format(texp/60))
+# Config plot 
+if norm_each_night:
+	ax1.set_title('Separate Norm. Per Night, Bin size = {} min'.format(texp/60))
+elif not norm_each_night:
+	if norm_globally:
+		ax1.set_title('Global Normalization (All Nights Together), Bin size = {} min'.format(texp/60))
+	else:
+		ax1.set_title('No nightly or global norm., Bin size = {} min'.format(texp/60))
 ax2.set_title('Bin size = {} min'.format(binsize))
 ax2.set_xlabel("Time (JD - 2457000)", size=15, color = 'black')
 fig.text(0.07,0.48, "Normalized flux", size=15, ha='center', va = 'center', rotation = 'vertical')
