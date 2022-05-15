@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 # add path to use as outdir in JGM Mac
 path = '/Users/jgarciamejia/Downloads'
 
+
 def tic_data_url(ticid, sector):
     url = 'https://archive.stsci.edu/missions/tess/tid/s%.4d/'%sector
     ticstr = '%.16d'%ticid
