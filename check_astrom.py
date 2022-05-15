@@ -35,7 +35,13 @@ for ifile,fits_filename in enumerate(sys.argv[3:]):
     #print (fits_filename)
     # read out astrometric fit coordinate rms (arcsec)
     # and number of astrometric standards used. 
-    stdcrms, numbrms = hdr['STDCRMS'], hdr['NUMBRMS']
+    try:
+        stdcrms, numbrms = hdr['STDCRMS'], hdr['NUMBRMS']
+    except KeyError:
+        print ('Astrom failed for:')
+        print (fits_filename)
+        flagged_files = np.append(flagged_files, fits_filename)
+        continue
     if stdcrms > maxrms:
         print ('stdcrms > {} for:'.format(maxrms))
         print (fits_filename,stdcrms)
