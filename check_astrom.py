@@ -35,24 +35,30 @@ for ifile,fits_filename in enumerate(sys.argv[3:]):
     #print (fits_filename)
     # read out astrometric fit coordinate rms (arcsec)
     # and number of astrometric standards used. 
-    stdcrms, numbrms = hdr['STDCRMS'], hdr['NUMBRMS']
+    try:
+        stdcrms, numbrms = hdr['STDCRMS'], hdr['NUMBRMS']
+    except KeyError:
+        print ('Astrom failed for:')
+        print (fits_filename)
+        flagged_files = np.append(flagged_files, fits_filename)
+        continue
     if stdcrms > maxrms:
         print ('stdcrms > {} for:'.format(maxrms))
         print (fits_filename,stdcrms)
-        if fits_filename not in flagged_files:
-            flagged_files = np.append(flagged_files, fits_filename)
+        flagged_files = np.append(flagged_files, fits_filename)
     if numbrms < minnum:
         print ('numbrms < {} for:'.format(minnum))
         print (fits_filename,numbrms)
-        if fits_filename not in flagged_files:
-            flagged_files = np.append(flagged_files, fits_filename)
+        flagged_files = np.append(flagged_files, fits_filename)
 
     stdcrms_lst = np.append(stdcrms_lst,stdcrms)
     numbrms_lst = np.append(numbrms_lst, numbrms)
-    #print ('{} DONE'.format(fits_filename))
-print (flagged_files)
-pdb.set_trace()
-np.savetxt('{}.{}.flagged_files.txt'.format(DATE,TARGET),flagged_files,fmt='%s')
+
+if len(flagged_files) >= 1:
+    print ('saved a list of flagged files')
+elif len(flagged_files) == 0:
+    print ('no flagged files')
+np.savetxt('{}.{}.flagged_files.txt'.format(DATE,TARGET),np.unique(flagged_files),fmt='%s')
 
 print ('Astrom checks Done.')
 print ('If no filenames were printed above, astrom succesful on all files.')
