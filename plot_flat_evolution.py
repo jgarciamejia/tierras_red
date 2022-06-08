@@ -1,7 +1,7 @@
 import numpy as np 
 from astropy.io import fits
 import matplotlib.pyplot as plt 
-from medsig import *
+from jgmmedsig import *
 
 weeks = ['20220405','20220412','20220419','20220503','20220510','20220517','20220524']
 #weeks = ['20220405','20220524']
