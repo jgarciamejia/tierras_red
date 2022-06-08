@@ -2,9 +2,7 @@ import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt 
 
-weeks = ['20220405','20220412','20220419',
-'20220426','20220503','20220510','20220517', 
-'20220524','20220531']
+weeks = ['20220405','20220412']#,'20220419','20220503','20220510','20220517','20220524']
 
 Mflats = []
 for date in weeks:
@@ -28,7 +26,7 @@ for nth_ratio in np.arange(len(weeks)):
 	ax2.plot(flat_num2/flat_denom2)
 
 	ax1.set_title('CCD Chip: Half 1')
-	ax1.set_title('CCD Chip: Half 2')
+	ax2.set_title('CCD Chip: Half 2')
 
 	ax1.set_xlabel('X pixel Coord')
 	ax2.set_xlabel('X pixel Coord')
@@ -37,6 +35,7 @@ for nth_ratio in np.arange(len(weeks)):
 	ax2.set_ylabel('Ratio {}:{}, Y (row) = {}'.format(weeks[nth_ratio+1],weeks[nth_ratio],str(row)))
 
 	plt.show()
+        plt.close
 
 
 
