@@ -16,6 +16,8 @@ for date in weeks:
 row = 100
 
 for nth_ratio in np.arange(len(weeks)):
+
+	f,(ax1,ax2) = plt.subplots(1,2,figsize = (10,5))
 	flat_num = Mflats[nth_ratio+1]
 	flat_denom = Mflats[nth_ratio]
 
