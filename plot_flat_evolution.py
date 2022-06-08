@@ -35,7 +35,7 @@ for nth_ratio in np.arange(len(weeks)):
 	ax2.set_ylabel('Ratio {}:{}, Y (row) = {}'.format(weeks[nth_ratio+1],weeks[nth_ratio],str(row)))
 
 	plt.show()
-        plt.close
+    plt.close
 
 
 
