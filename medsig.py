@@ -1,6 +1,7 @@
-import numpy as np
-# Medsig function
+import numpy
+
 def medsig(a):
-  median = np.median(a)
-  sigma = 1.482602218505601*np.median(np.absolute(a-median))
+  median = numpy.median(a)
+  sigma = 1.482602218505601*numpy.median(numpy.absolute(a-median))
   return(median, sigma)
+
