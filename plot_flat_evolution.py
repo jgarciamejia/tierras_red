@@ -3,11 +3,14 @@ from astropy.io import fits
 import matplotlib.pyplot as plt 
 from jgmmedsig import *
 
-weeks = ['20220405','20220412','20220419','20220503','20220510','20220517','20220524']
-#weeks = ['20220405','20220524']
+#weeks = ['20220405','20220412','20220419','20220503','20220510','20220517','20220524']
+weeks = ['20220419','20220524']
+weeks = ['20220405','20220517']
+days = ['20220508','20220509']
+days = ['20220510','20220511']
 
 Mflats = []
-for date in weeks:
+for date in days:
 	hdu = fits.open('/data/tierras/incoming/{}/MASTERFLAT_mednorm.fit'.format(date))
 	Mflats.append(hdu)
 
@@ -114,4 +117,9 @@ plt.legend()
 plt.show()
 
 
+hdu0 = fits.PrimaryHDU(header=flat_num[0].header)
+hdu1 = fits.ImageHDU(flat_num1/flat_denom1, header=flat_num[1].header)
+hdu2 = fits.ImageHDU(flat_num2/flat_denom2, header=flat_num[2].header)
+hdu = fits.HDUList([hdu0,hdu1,hdu2])
+hdu.writeto('/data/tierras/JRDtest4.fit',overwrite=True)
 
