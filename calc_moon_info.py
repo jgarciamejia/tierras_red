@@ -22,12 +22,12 @@ def main():
   args = ap.parse_args()
   
   for ifile, fitsfile in enumerate(args.filenames):
-      print (fitsfile)
-      if 'medfilt_kernel' in fitsfile:
-          continue
-      if 'MASTERFLAT' in fitsfile:
-          continue
-
+    print (fitsfile)
+    if 'medfilt_kernel' in fitsfile:
+      continue
+    if 'MASTERFLAT' in fitsfile:
+      continue
+    
     fp = pyfits.open(fitsfile)
     mp = fp[0]
     hdr = mp.header
@@ -40,34 +40,34 @@ def main():
     # MOON CALCS USING LFA 
     # Set up observer.
     obs = lfa.observer(lon, lat, height)
-    
+
     # Figure out TT-UTC from given UTC.
     iutc = int(utc)
     ttmutc = obs.dtai(iutc, utc-iutc) + lfa.DTT
-    
+
     # Compute time-dependent quantities.
     obs.update(utc, ttmutc, lfa.OBSERVER_UPDATE_ALL)
-    
+
     # Compute topocentric Sun and Moon position.
     sun = lfa.source_planet(lfa.JPLEPH_SUN)
     ssun, dsdtsun, prsun = obs.place(sun, lfa.TR_TO_TOPO_AZ)
-    
+
     moon = lfa.source_planet(lfa.JPLEPH_MOON)
     smoon, dsdtmoon, prmoon = obs.place(moon, lfa.TR_TO_TOPO_AZ)
-    
+
     # Moon elevation.
     moonaz = math.atan2(smoon[1], -smoon[0])
     lfa_moonaz = lfa.ranorm(moonaz)
     lfa_moonel = math.atan2(smoon[2], math.hypot(smoon[0], smoon[1]))
-    
+
     # Cosine of elongation of moon from sun = dot product.
     cosphi = numpy.dot(ssun, smoon)
-    
+
     # Fraction of lunar surface illuminated.
     lfa_moonillum = 0.5*(1.0 - cosphi)
 
     domeaz = float(hdr["DOMEAZ"])
-    
+
     catra = hdr["CAT-RA"]
     catde = hdr["CAT-DEC"]
     ratarg, rv = lfa.base60_to_10(catra, ":", lfa.UNIT_HR, lfa.UNIT_RAD)
@@ -75,7 +75,7 @@ def main():
 
     targ = lfa.source(ratarg, detarg)
     starg, dsdttarg, prtarg = obs.place(targ, lfa.TR_TO_TOPO_AZ)
-    
+
     targaz = math.atan2(starg[1], -starg[0])
     lfa_targaz = lfa.ranorm(targaz)
     lfa_targel = math.atan2(starg[2], math.hypot(starg[0], starg[1]))
