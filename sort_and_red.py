@@ -17,6 +17,38 @@ import matplotlib.pyplot as plt
 
 from imred import *
 
+import logging
+
+def setup_logger(log_file, log_level=logging.INFO):
+    """Set up a logger with a FileHandler and a StreamHandler.
+    Args:
+        log_file (str): The name of the log file.
+        log_level (int, optional): The log level. Defaults to logging.INFO.
+    Returns:
+        logger: The logger object.
+    """
+    logger = logging.getLogger(__name__)
+    logger.setLevel(log_level)
+
+    # Create a FileHandler
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(log_level)
+
+    # Create a StreamHandler
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(log_level)
+
+    # Create a logging format
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    stream_handler.setFormatter(formatter)
+
+    # Add the FileHandler and StreamHandler to the logger
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+
+    return logger
+
 def create_directories(basepath,date,target,folder1):
     datepath = os.path.join(basepath,date)
     targetpath = os.path.join(datepath,target)
@@ -37,6 +69,7 @@ def make_filelist(basepath,date,target):
     fullpath = os.path.join(basepath,date)
     return sorted([os.path.join(fullpath,f) for f in os.listdir(fullpath) if target+'.fit' in f])
 
+
 # Deal with command line
 ap = argparse.ArgumentParser()
 ap.add_argument("-f", help="Flat file with which to reduce data.")
@@ -47,25 +80,7 @@ ap.add_argument("-ffname", required=True, help="Name of folder in which to store
 args = ap.parse_args()
 
 # Set up logger with FileHandler and StreamHandler
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-# Create FileHandler
-file_handler = logging.FileHandler('{}.{}.redlog.txt'.format(date,target))
-file_handler.setLevel(logging.INFO)
-
-#Create StreamHandler
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel(logging.INFO)
-
-#Create a logging format
-formatter = logging.Formatter('%(asctime)s - %(name)s - (levelname)s - %(message)s')
-file_handler.setFormatter(formatter)
-stream_handler.setFormatter(formatter)
-
-# Add both handlers to logger
-logger.addHandler(file_handler)
-logger.addHandler(stream_handler)
+logger = setup_logger('{}.{}.redlog.txt'.format(date,target))
 
 # Access observation info
 date = args.date
@@ -88,20 +103,20 @@ irobj = imred(args.f)
 filelist = make_filelist(ipath,date,target)
 
 # Reduce each FITS file from date and target
-print ('Reducing {} FITS files...'.format(len(filelist)))
+logging.info('Reducing {} FITS files...'.format(len(filelist)))
 rfilelist = []
 for ifile,filename in enumerate(filelist):
-    print (filename)
+    logging.info(filename)
     ohl = irobj.read_and_reduce(filename,stitch=True)
     basename = os.path.basename(filename)
     rfilename = re.sub('\.fit','',basename)+'_red.fit'
     rfilename = os.path.join(ffolder,rfilename)
     ohl.writeto(rfilename,overwrite=True)
     rfilelist.append(rfilename)
-    print (filename+ " -> " +rfilename)
+    logging.info(filename+ " -> " +rfilename)
 
 # Exclude files where ASTROM solution fails and exptime diff. to mode of stack
-print ('Checking astrometric solution on plate solved files...')
+logging.info('Checking astrometric solution on plate solved files...')
 
 exptimes = np.array([])
 badfiles = np.array([])
@@ -124,44 +139,42 @@ for irfile,rfilename in enumerate(rfilelist):
     try:
         stdcrms, numbrms = hdr['STDCRMS'], hdr['NUMBRMS']
     except KeyError:
-        print ('Astrom failed for:')
-        print (rfilename)
+        logging.info('Astrom failed for:')
+        logging.info(rfilename)
         badfiles = np.append(badfiles,rfilename)
         continue
     stdcrms_lst = np.append(stdcrms_lst,stdcrms)
     numbrms_lst = np.append(numbrms_lst, numbrms)
 
-print ('Astrometry checks: Done.')
+logging.info('Astrometry checks: Done.')
 
-# Add any files with different exposure time to majority to flagged list
+# Add any files with different exposure time to flagged list
 texp = stats.mode(exptimes)[0][0]
-print ('Stack texp = {} s.'.format(texp))
+logging.info('Stack texp = {} s.'.format(texp))
 for irfile,rfilename in enumerate(rfilelist):
     if exptimes[ifile] != texp:
-        print ('texp = {} s for:'.format(exptimes[ifile]))
-        print (rfilename)
+        logging.info('texp = {} s for:'.format(exptimes[ifile]))
+        logging.info(rfilename)
         badfiles = np.append(badfiles,rfilename)
-print ('Exposure time checks: Done.')
+logging.info('Exposure time checks: Done.')
 
 # Save flagged file list for future ref
 if len(badfiles) >= 1:
-    print ('Saved a list of flagged files.')
+    logging.info('Saved a list of flagged files.')
 elif len(badfiles) == 0:
-    print ('No files were flagged.')
+    logging.info('No files were flagged.')
 np.savetxt(os.path.join(ffolder,'{}.{}.flagged_files.txt'.format(date,target)),np.unique(badfiles),fmt='%s')
 
 # Make excluded directory and move flagged files there
 excfolder = os.path.join(ffolder,'excluded/')
-print (excfolder)
+logging.info(excfolder)
 os.system('mkdir '+excfolder)
 for badfile in badfiles:
-    #print ('mv ' + badfile + ' '+ excfolder)
-    #if not os.path.exists(os.path.join(excfolder,badfile)):
     os.system('mv ' + badfile + ' '+ excfolder)
 
 # Save histogram with astrom solution stdv and number of stars used
 fig, (ax1,ax2) = plt.subplots(1,2,figsize=(14,7))
-fig.suptitle('Astrometry Evaluation')
+fig.suptitle('Astrometry Evaluation: {} {}'.format(date,target))
 
 ax1.hist(stdcrms_lst, 20)
 ax1.set_xlabel('Astrometric fit coord rms (arcsec)')
@@ -172,11 +185,13 @@ ax2.set_ylabel('Number of Exposures')
 ax2.set_xlabel('Number of astrometric standards used')
 histogram = os.path.join(ffolder,"{}.{}_astrom_hist.pdf".format(date,target))
 fig.savefig(histogram)
+logging.info('Astrometry solution histogram saved')
 
 # Send log file and STDRMS/NUMBRMS .pdf file to email
-#logfile = os.path.join(ffolder,'log.txt')
-#subject = '[Tierras]_Data_Reduction_Report:{}_{}'.format(date,target)
-#append = '{} {}'.format(logfile,histogram)
-#append = '{}'.format(histogram)
-#email = 'juliana.garcia-mejia@cfa.harvard.edu'
-#os.system('echo | mutt {} -s {} -a {}'.format(email,subject,append))
+logfile = os.path.join(ffolder,'log.txt')
+subject = '[Tierras]_Data_Reduction_Report:{}_{}'.format(date,target)
+append = '{} {}'.format(logfile,histogram)
+append = '{}'.format(histogram)
+email = 'juliana.garcia-mejia@cfa.harvard.edu'
+os.system('echo | mutt {} -s {} -a {}'.format(email,subject,append))
+logging.info('Data reduction report sent to {}'.format(email))
