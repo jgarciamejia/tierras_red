@@ -163,7 +163,7 @@ logging.info('Saved two histograms summarizing the astrometric solution.')
 subject = '[Tierras]_Data_Reduction_Report:{}_{}'.format(date,target)
 append = '{} {}'.format(logfile,histogram)
 #append = '{}'.format(histogram)
-email = 'juliana.garcia-mejia@cfa.harvard.edu'
+emails = 'juliana.garcia-mejia@cfa.harvard.edu patrick.tamburo@cfa.harvard.edu'
 os.system('echo | mutt {} -s {} -a {}'.format(email,subject,append))
 
 print ('Data reduction done.')
