@@ -9,45 +9,16 @@ import sys
 import os
 import re
 import glob
+import pdb
 
 import numpy as np
 from scipy import stats
 from astropy.io import fits 
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 from imred import *
 
 import logging
-
-def setup_logger(log_file, log_level=logging.INFO):
-    """Set up a logger with a FileHandler and a StreamHandler.
-    Args:
-        log_file (str): The name of the log file.
-        log_level (int, optional): The log level. Defaults to logging.INFO.
-    Returns:
-        logger: The logger object.
-    """
-    logger = logging.getLogger(__name__)
-    logger.setLevel(log_level)
-
-    # Create a FileHandler
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(log_level)
-
-    # Create a StreamHandler
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(log_level)
-
-    # Create a logging format
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(formatter)
-    stream_handler.setFormatter(formatter)
-
-    # Add the FileHandler and StreamHandler to the logger
-    logger.addHandler(file_handler)
-    logger.addHandler(stream_handler)
-
-    return logger
 
 def create_directories(basepath,date,target,folder1):
     datepath = os.path.join(basepath,date)
@@ -76,11 +47,7 @@ ap.add_argument("-f", help="Flat file with which to reduce data.")
 ap.add_argument("-date", required=True, help="Date of observation in YYYYMMDD format.")
 ap.add_argument("-target", required=True, help="Name of observed target exactly as shown in raw FITS files.")
 ap.add_argument("-ffname", required=True, help="Name of folder in which to store reduced+flattened data. Convention is flatXXXX. XXXX=0000 means no flat was used.")
-
 args = ap.parse_args()
-
-# Set up logger with FileHandler and StreamHandler
-logger = setup_logger('{}.{}.redlog.txt'.format(date,target))
 
 # Access observation info
 date = args.date
@@ -96,14 +63,19 @@ lcpath = '/data/tierras/lightcurves'
 ffolder = create_directories(fpath,date,target,ffname)
 lcfolder = create_directories(lcpath,date,target,ffname)
 
-# Create image reduction object
-irobj = imred(args.f)
+# Set up logger
+logfile = os.path.join(ffolder,'{}.{}.redlog.txt'.format(date,target))
+#logfile = '{}.{}.redlog.txt'.format(date,target)
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+logging.basicConfig(filename=logfile, level=logging.INFO)
 
-# Make list of files for imred
+# Get list of files to be reduced
 filelist = make_filelist(ipath,date,target)
 
 # Reduce each FITS file from date and target
 logging.info('Reducing {} FITS files...'.format(len(filelist)))
+irobj = imred(args.f)
 rfilelist = []
 for ifile,filename in enumerate(filelist):
     logging.info(filename)
@@ -185,13 +157,14 @@ ax2.set_ylabel('Number of Exposures')
 ax2.set_xlabel('Number of astrometric standards used')
 histogram = os.path.join(ffolder,"{}.{}_astrom_hist.pdf".format(date,target))
 fig.savefig(histogram)
-logging.info('Astrometry solution histogram saved')
+logging.info('Saved two histograms summarizing the astrometric solution.')
 
 # Send log file and STDRMS/NUMBRMS .pdf file to email
-logfile = os.path.join(ffolder,'log.txt')
 subject = '[Tierras]_Data_Reduction_Report:{}_{}'.format(date,target)
 append = '{} {}'.format(logfile,histogram)
-append = '{}'.format(histogram)
+#append = '{}'.format(histogram)
 email = 'juliana.garcia-mejia@cfa.harvard.edu'
 os.system('echo | mutt {} -s {} -a {}'.format(email,subject,append))
-logging.info('Data reduction report sent to {}'.format(email))
+
+print ('Data reduction done.')
+print ('Data reduction report sent to {}'.format(email))
