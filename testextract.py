@@ -16,10 +16,7 @@ except ImportError:
   import pywcs
 
 from imred import *
-#import imred
 import pdb
-#pdb.set_trace()
-
 
 # Deal with the command line.
 ap = argparse.ArgumentParser()
@@ -125,8 +122,8 @@ if True:
     targ = objs[itarg]
     
     # Select reference stars.
-    ww = numpy.logical_and(objs["peak"] < 20000,
-                           objs["flux"] > targ["flux"]/10)
+    ww = numpy.logical_and(objs["peak"] < 40000,
+                           objs["flux"] > targ["flux"]/20) # placeholder for fancy algorithm
     ww[itarg] = 0  # deselect target
     
     possible_refs = objs[ww]
@@ -139,10 +136,10 @@ if True:
     
     print("Selected {0:d} reference stars".format(len(refs)))
     # For now, exclude variable refs by hand
-    oldnrefs = len(refs)
-    refs = numpy.delete(refs,[7])
+    #oldnrefs = len(refs)
+    #refs = numpy.delete(refs,[5])
     #pdb.set_trace()
-    print("Excluded {0:d} reference stars by hand".format(oldnrefs-len(refs)))
+    #print("Excluded {0:d} reference stars by hand".format(oldnrefs-len(refs)))
     
     # Array of positions to do photometry at.
     xphot = numpy.concatenate(([targ["x"]], refs["x"]))+1
@@ -158,10 +155,10 @@ if True:
 
 # Output files 
 # data per comparison(=ref) per aperture.
-ofpc = [[None]*len(refs) for i in range(len(rap))]
-for irap,thisrap in enumerate(rap):
-  for iref,ref in enumerate(refs):
-    ofpc[irap][iref] = open("lc{0:02.0f}.ref{1}".format(int(thisrap),iref), "w")
+#ofpc = [[None]*len(refs) for i in range(len(rap))]
+#for irap,thisrap in enumerate(rap):
+  #for iref,ref in enumerate(refs):
+    #ofpc[irap][iref] = open("lc{0:02.0f}.ref{1}".format(int(thisrap),iref), "w")
 
 for ifile, filename in enumerate(args.filelist):
   print(filename)
@@ -187,9 +184,11 @@ for ifile, filename in enumerate(args.filelist):
   temperat = float(hdr["TEMPERAT"])
   humid = float(hdr["HUMIDITY"])
   focus = float(hdr["FOCUS"])
-  dometemp = float(hdr["DOMETEMP"])
-  domehumid = float(hdr["DOMEHUMI"])
-
+  try:
+    dometemp = float(hdr["DOMETEMP"])
+    domehumid = float(hdr["DOMEHUMI"])
+  except KeyError:
+    dometemp,domehumid = numpy.nan, numpy.nan
   stdcrms = float(hdr["STDCRMS"])
   numbrms = int(hdr["NUMBRMS"])
 
@@ -237,7 +236,7 @@ for ifile, filename in enumerate(args.filelist):
     ofp[irap].write("{0:14.6f} {1:10.8f} {2:10.8f} {3:12.6f} {4:12.6f} {5:12.6f} {6:12.6f} {7:10.8f} {8:10.8f} {9:10.5f} {10:10.1f} {11:10.8f} {12:10.8f} {13:10.8f} {14:8.3f} {15:10.5f} {16:10.3f} {17:10.3f} {18:8.1f} {19:10.3f} {20:10.3f}\n".format(2400000.5+mjd, flux[0], fluxerr[0],xnew[0], ynew[0], xap[0], yap[0], skylev[0], skynoise[0], hfd[0], norm, e_norm, diff_flux[0], e_diff_flux[0], exptime, airmass, temperat, humid,focus, dometemp, domehumid))
 
     # Save comp star lc output. Each comp star gets its own file per aperture.
-    for iref in range(len(refs)):
+    #for iref in range(len(refs)):
     #for iref,ref in enumerate(refs):
-      ofpc[irap][iref].write("{0:14.6f} {1:10.8f} {2:10.8f} {3:12.6f} {4:12.6f} {5:12.6f} {6:12.6f} {7:10.8f} {8:10.8f} {9:10.5f}\n".format(2400000.5+mjd, flux[iref+1], fluxerr[iref+1], xnew[iref+1], ynew[iref+1], xap[iref+1], yap[iref+1], skylev[iref+1], skynoise[iref+1], hfd[iref+1]))
+      #ofpc[irap][iref].write("{0:14.6f} {1:10.8f} {2:10.8f} {3:12.6f} {4:12.6f} {5:12.6f} {6:12.6f} {7:10.8f} {8:10.8f} {9:10.5f}\n".format(2400000.5+mjd, flux[iref+1], fluxerr[iref+1], xnew[iref+1], ynew[iref+1], xap[iref+1], yap[iref+1], skylev[iref+1], skynoise[iref+1], hfd[iref+1]))
 
