@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-To use, pass code <script> targetname obsdate [savefig=]True/False idealapsize(pix) lcx.txt files
+To use, pass code targetname, obsdate, savefig=True/False, and lcx.txt files
 '''
 
 from __future__ import print_function
@@ -17,12 +17,13 @@ import matplotlib.ticker
 
 from medsig import *
 from poly import *
+import pdb
 
 decimal_to_ppm = (10)**6
 
 #User-input 
-idealap = float(sys.argv[4]) #pixel
-idealbinsize = 3.0 #mins
+idealap = 10.0 #pixel, change as desired
+idealbinsize = 10.0 #mins, change as desired
 
 #nap = len(sys.argv[1:])
 #targname = 'GJ1105_short'
@@ -32,7 +33,7 @@ idealbinsize = 3.0 #mins
 targname = sys.argv[1]
 obsdate = sys.argv[2]
 savefig = sys.argv[3] #must be True or False
-n = 5
+n = 4
 nap = len(sys.argv[n:])
 apsize = numpy.empty([nap])
 binsize = numpy.linspace(0.2, 10, 50)
@@ -144,7 +145,7 @@ for iap, filename in enumerate(sys.argv[n:]):
       plt.ylabel("Normalized flux")
 
       plt.xlim(mjd[0]*24, mjd[-1]*24)
-      #plt.ylim(0.991, 1.009)
+      plt.ylim(0.991, 1.009)
 
       plt.legend()
 
@@ -154,7 +155,7 @@ for iap, filename in enumerate(sys.argv[n:]):
 
       plt.gca().xaxis.set_visible(False)
       plt.gca().yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter("%.2f"))
-      plt.ylim(1,3)
+
       plt.ylabel("Seeing (\")")
 
       plt.subplot(gslc[2], sharex=figlc)
@@ -199,6 +200,7 @@ plt.legend()
 #M3_radius = 0.3 # estimate to improve
 #x_sigma = 1
 # Convert y1 to y2
+#pdb.set_trace()
 #P_REarth = lambda P_ppm: numpy.sqrt(x_sigma*P_ppm/decimal_to_ppm) * M3_radius * Rp_per_Rsun
 # Convert y2 to y1
 #P_ppm = lambda P_REarth: (1/x_sigma)*(P_REarth/(M3_radius * Rp_per_Rsun))**2
@@ -221,4 +223,5 @@ elif savefig == 'False':
   plt.show()
 else:
   #plt.show()
-  print ('user forgot arg specifying whether to save figure')
+  #print ('user forgot arg specifying whether to save figure')
+  print ('pass code targetname, obsdate, savefig=True/False, and lcx.txt files')
