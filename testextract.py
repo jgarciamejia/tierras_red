@@ -187,10 +187,11 @@ for ifile, filename in enumerate(args.filelist):
   try:
     dometemp = float(hdr["DOMETEMP"])
     domehumid = float(hdr["DOMEHUMI"])
+    stdcrms = float(hdr["STDCRMS"])
+    numbrms = int(hdr["NUMBRMS"])
   except KeyError:
     dometemp,domehumid = numpy.nan, numpy.nan
-  stdcrms = float(hdr["STDCRMS"])
-  numbrms = int(hdr["NUMBRMS"])
+    stdcrms,numbrms = numpy.nan, numpy.nan
 
   if stdcrms > 1.0 or numbrms < 5:
     logging.error("{0:s} astrometry is bad".format(filename))
