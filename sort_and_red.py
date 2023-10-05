@@ -14,7 +14,7 @@ import pdb
 import numpy as np
 from scipy import stats
 from astropy.io import fits 
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 from imred import *
 
@@ -164,7 +164,7 @@ subject = '[Tierras]_Data_Reduction_Report:{}_{}'.format(date,target)
 append = '{} {}'.format(logfile,histogram)
 #append = '{}'.format(histogram)
 emails = 'juliana.garcia-mejia@cfa.harvard.edu patrick.tamburo@cfa.harvard.edu'
-os.system('echo | mutt {} -s {} -a {}'.format(email,subject,append))
+os.system('echo | mutt {} -s {} -a {}'.format(emails,subject,append))
 
 print ('Data reduction done.')
-print ('Data reduction report sent to {}'.format(email))
+print ('Data reduction report sent to {}'.format(emails))
