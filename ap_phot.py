@@ -456,48 +456,48 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 	mjd_utc = np.zeros(len(file_list),dtype='float')
 	jd_utc = np.zeros(len(file_list),dtype='float')
 	bjd_tdb = np.zeros(len(file_list),dtype='float')
-	airmasses = np.zeros(len(file_list),dtype='float')
-	ccd_temps = np.zeros(len(file_list),dtype='float')
-	exp_times = np.zeros(len(file_list),dtype='float')
-	dome_temps = np.zeros(len(file_list),dtype='float')
-	focuses = np.zeros(len(file_list),dtype='float')
-	dome_humidities = np.zeros(len(file_list),dtype='float')
-	sec_temps = np.zeros(len(file_list),dtype='float')
-	ret_temps = np.zeros(len(file_list),dtype='float')
-	pri_temps = np.zeros(len(file_list),dtype='float')
-	rod_temps = np.zeros(len(file_list),dtype='float')
-	cab_temps = np.zeros(len(file_list),dtype='float')
-	inst_temps = np.zeros(len(file_list),dtype='float')
-	temps = np.zeros(len(file_list),dtype='float')
-	humidities = np.zeros(len(file_list),dtype='float')
-	dewpoints = np.zeros(len(file_list),dtype='float')
-	sky_temps = np.zeros(len(file_list),dtype='float')
+	airmasses = np.zeros(len(file_list),dtype='float16')
+	ccd_temps = np.zeros(len(file_list),dtype='float16')
+	exp_times = np.zeros(len(file_list),dtype='float16')
+	dome_temps = np.zeros(len(file_list),dtype='float16')
+	focuses = np.zeros(len(file_list),dtype='float16')
+	dome_humidities = np.zeros(len(file_list),dtype='float16')
+	sec_temps = np.zeros(len(file_list),dtype='float16')
+	ret_temps = np.zeros(len(file_list),dtype='float16')
+	pri_temps = np.zeros(len(file_list),dtype='float16')
+	rod_temps = np.zeros(len(file_list),dtype='float16')
+	cab_temps = np.zeros(len(file_list),dtype='float16')
+	inst_temps = np.zeros(len(file_list),dtype='float16')
+	temps = np.zeros(len(file_list),dtype='float16')
+	humidities = np.zeros(len(file_list),dtype='float16')
+	dewpoints = np.zeros(len(file_list),dtype='float16')
+	sky_temps = np.zeros(len(file_list),dtype='float16')
 	
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH SOURCE IN EACH FILE
-	source_x = np.zeros((len(targ_and_refs),len(file_list)),dtype='float')
-	source_y = np.zeros((len(targ_and_refs),len(file_list)),dtype='float')
-	source_sky_ADU = np.zeros((len(targ_and_refs),len(file_list)),dtype='float')
-	source_sky_e = np.zeros((len(targ_and_refs),len(file_list)),dtype='float')
+	source_x = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_y = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_sky_ADU = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_sky_e = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
 
 
 	#ARRAYS THAT CONTAIN DATA PERTAININING TO EACH APERTURE RADIUS FOR EACH SOURCE FOR EACH FILE
-	source_minus_sky_ADU = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float')
-	source_minus_sky_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float')
-	source_minus_sky_err_ADU = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float')
-	source_minus_sky_err_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float')
-	non_linear_flags = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='int')
-	saturated_flags = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='int')
+	source_minus_sky_ADU = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	source_minus_sky_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	source_minus_sky_err_ADU = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	source_minus_sky_err_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	non_linear_flags = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='bool')
+	saturated_flags = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='bool')
 	
-	total_ref_ADU = np.zeros((len(ap_radii),len(file_list)),dtype='float')
-	total_ref_err_ADU = np.zeros((len(ap_radii),len(file_list)),dtype='float')
-	total_ref_e = np.zeros((len(ap_radii),len(file_list)),dtype='float')
-	total_ref_err_e = np.zeros((len(ap_radii),len(file_list)),dtype='float')
+	total_ref_ADU = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
+	total_ref_err_ADU = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
+	total_ref_e = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
+	total_ref_err_e = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
 
 
-	source_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float')
-	an_in_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float')
-	an_out_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float')
-
+	source_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float16')
+	an_in_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float16')
+	an_out_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float16')
+	
 	#Load in the stacked image of the field that was used for source identification. 
 	#All images will be cross-correlated with this to determine aperture positions. 
 	bpm = load_bad_pixel_mask()
@@ -531,7 +531,7 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 	reference_image_data -= bkg.back()
 	
 	n_files = len(file_list)
-	plt.figure()
+	#plt.figure()
 	print(f'Doing fixed-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.\n')
 	time.sleep(2)
 	for i in range(n_files):
@@ -680,33 +680,38 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 				annulus_mask = an.to_mask(method='center').to_image(np.shape(cutout))
 				an_data = annulus_mask * cutout
 				
-				source_mask = make_source_mask(cutout, nsigma=3, npixels=5, dilate_size=4)
+				#source_mask = make_source_mask(cutout, nsigma=3, npixels=5, dilate_size=4) #source mask eats up a LOT of memory, why???
+				source_mask = np.zeros(np.shape(cutout),dtype='bool')
 
 				# #Plot the source mask
 				# fig, ax = plt.subplots(1,2,figsize=(10,7))
 				# ax[0].imshow(an_data, origin='lower',norm=ImageNormalize(cutout,interval=ZScaleInterval()),interpolation='none')
 				# ax[1].imshow(source_mask, origin='lower',norm=ImageNormalize(cutout,interval=ZScaleInterval()),interpolation='none')
-				# breakpoint()
 
-				an_data *= ~source_mask 
+				an_data_masked = an_data*~source_mask 
+				an_data_1d = an_data_masked[an_data_masked != 0] #unwrap into 1d array
 
-				an_data_1d = an_data[an_data != 0] #unwrap into 1d array
 
-				an_vals, hi, lo = sigmaclip(an_data_1d) #toss outliers
-				bkg = np.median(an_vals) #take median of remaining values as per-pixel background estimate
+				#Discard any negative values in the annulus
+				an_data_1d = an_data_1d[np.where(an_data_1d>0)[0]]
+
+				an_vals, hi, lo = sigmaclip(an_data_1d,3,3) #toss outliers
+				bkg = np.mean(an_vals) #take median of remaining values as per-pixel background estimate
+
+				# 	plt.figure()
+				# 	plt.hist(an_vals,bins=25)
+				# 	plt.axvline(bkg, color='tab:orange')
+				# 	breakpoint()
 				
 				source_sky_ADU[j,i] = bkg
 				source_sky_e[j,i] = bkg*GAIN
+				
+				del source_mask, an_data_masked, an_data_1d, cutout #Delete to save memory?
 
 				# if j == 19:
 				# 	plt.figure()
 				# 	plt.imshow(an_data, origin='lower',norm=ImageNormalize(an_data,interval=ZScaleInterval()),interpolation='none')
 				# 	breakpoint()
-
-				#Plot histogram of sigma-clipped, source-masked annulus values. 
-				# plt.figure()
-				# plt.hist(an_vals,bins=25)
-				# plt.axvline(bkg, color='tab:orange')
 
 				source_minus_sky_ADU[k,j,i] = phot_table['aperture_sum'][0]-bkg*ap.area 
 				source_minus_sky_e[k,j,i] = source_minus_sky_ADU[k,j,i]*GAIN
@@ -714,15 +719,15 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 				source_minus_sky_err_ADU[k,j,i] = source_minus_sky_err_e[k,j,i]/GAIN
 
 				#Plot normalized target source-sky as you go along
-				if j == 0 and k == 0:
-					target_renorm_factor = np.mean(source_minus_sky_ADU[k,j,0:i+1])
-					targ_norm = source_minus_sky_ADU[k,j,0:i+1]/target_renorm_factor
-					targ_norm_err = source_minus_sky_err_ADU[k,j,0:i+1]/target_renorm_factor
+				# if j == 0 and k == 0:
+				# 	target_renorm_factor = np.mean(source_minus_sky_ADU[k,j,0:i+1])
+				# 	targ_norm = source_minus_sky_ADU[k,j,0:i+1]/target_renorm_factor
+				# 	targ_norm_err = source_minus_sky_err_ADU[k,j,0:i+1]/target_renorm_factor
 					
-					plt.errorbar(mjd_utc[0:i+1],targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k')
-					#plt.ylim(380000,440000)
-					plt.xlabel('Time (MJD)')
-					plt.ylabel('ADU')
+				# 	plt.errorbar(mjd_utc[0:i+1],targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k')
+				# 	#plt.ylim(380000,440000)
+				# 	plt.xlabel('Time (MJD)')
+				# 	plt.ylabel('ADU')
 					
 
 				#Create first-order ALC by summing all reference counts (by convention, positions 1: in our arrays)
@@ -731,14 +736,14 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 				total_ref_e[k,i] = sum(source_minus_sky_e[k,1:,i])
 				total_ref_err_e[k,i] = np.sqrt(np.sum(source_minus_sky_err_e[k,1:,i]**2))
 
-		if k == 0:
-			alc_renorm_factor = np.mean(total_ref_ADU[k,0:i+1])
-			alc_norm = total_ref_ADU[k,0:i+1]/alc_renorm_factor
-			alc_norm_err = total_ref_err_ADU[k,0:i+1]/alc_renorm_factor
-			plt.errorbar(mjd_utc[0:i+1],alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r')
-			plt.ylim(0.98,1.02)
-			plt.pause(0.2)
-			plt.clf()
+		# if k == 0:
+		# 	alc_renorm_factor = np.mean(total_ref_ADU[k,0:i+1])
+		# 	alc_norm = total_ref_ADU[k,0:i+1]/alc_renorm_factor
+		# 	alc_norm_err = total_ref_err_ADU[k,0:i+1]/alc_renorm_factor
+		# 	plt.errorbar(mjd_utc[0:i+1],alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r')
+		# 	plt.ylim(0.98,1.02)
+		# 	plt.pause(0.2)
+		# 	plt.clf()
 
 	#Write out photometry. 
 	for i in range(len(ap_radii)):
@@ -880,8 +885,8 @@ if __name__ == '__main__':
 	
 	targ_and_refs = reference_star_chooser(flattened_files)
 
-	ap_radii = np.arange(13,14)
-	fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=40, an_out=60)
+	# ap_radii = np.arange(13,14)
+	# fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=40, an_out=60)
 
 	fig, ax = plot_image(fits.open(flattened_files[0])[0].data)
 	ax.plot(targ_and_refs['x'][0], targ_and_refs['y'][0],'bx')
