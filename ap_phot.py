@@ -494,8 +494,8 @@ def jd_utc_to_bjd_tdb(jd_utc, ra, dec, location='Whipple'):
     ltt_bary = input_jd_utc.light_travel_time(target)
     return (input_jd_utc.tdb + ltt_bary).value
 
-def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40,an_out=60, save_target_cutout=False):
-	#file_list = file_list[-5:] #TESTING!!!
+def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40,an_out=60, save_target_cutout=False, live_plot=False):
+	file_list = file_list[-5:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
@@ -546,11 +546,18 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 	source_minus_sky_err_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
 	non_linear_flags = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='bool')
 	saturated_flags = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='bool')
+	ensemble_alc_ADU = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	ensemble_alc_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	ensemble_alc_err_ADU = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	ensemble_alc_err_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	relative_flux = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	relative_flux_err = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
 	
-	total_ref_ADU = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
-	total_ref_err_ADU = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
-	total_ref_e = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
-	total_ref_err_e = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
+
+	# total_ref_ADU = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
+	# total_ref_err_ADU = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
+	# total_ref_e = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
+	# total_ref_err_e = np.zeros((len(ap_radii),len(file_list)),dtype='float32')
 
 	source_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float16')
 	an_in_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float16')
@@ -800,38 +807,56 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 					# plt.tight_layout()
 
 				#Plot normalized target source-sky as you go along
-				if j == 0 and k == 0:
+				if live_plot and j == 0 and k == 0:
 					target_renorm_factor = np.mean(source_minus_sky_ADU[k,j,0:i+1])
 					targ_norm = source_minus_sky_ADU[k,j,0:i+1]/target_renorm_factor
 					targ_norm_err = source_minus_sky_err_ADU[k,j,0:i+1]/target_renorm_factor
 					
-					ax[0].errorbar(mjd_utc[0:i+1],targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k',label='Normalized target flux')
+					ax[0].errorbar(bjd_tdb[0:i+1],targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k',label='Normalized target flux')
 					#plt.ylim(380000,440000)
 					ax[0].set_ylabel('Normalized Flux')
 					
 
-				#Create first-order ALC by summing all reference counts (by convention, positions 1: in our arrays)
-				total_ref_ADU[k,i] = sum(source_minus_sky_ADU[k,1:,i]) #Sum up all the reference star counts
-				total_ref_err_ADU[k,i] = np.sqrt(np.sum(source_minus_sky_err_ADU[k,1:,i]**2))
-				total_ref_e[k,i] = sum(source_minus_sky_e[k,1:,i])
-				total_ref_err_e[k,i] = np.sqrt(np.sum(source_minus_sky_err_e[k,1:,i]**2))
+				# #Create first-order ALC by summing all reference counts (by convention, positions 1: in our arrays)
+				# total_ref_ADU[k,i] = sum(source_minus_sky_ADU[k,1:,i]) #Sum up all the reference star counts
+				# total_ref_err_ADU[k,i] = np.sqrt(np.sum(source_minus_sky_err_ADU[k,1:,i]**2))
+				# total_ref_e[k,i] = sum(source_minus_sky_e[k,1:,i])
+				# total_ref_err_e[k,i] = np.sqrt(np.sum(source_minus_sky_err_e[k,1:,i]**2))
+		
+		#Create ensemble ALCs (summed reference fluxes with no weighting) for each source
+		for l in range(len(targ_and_refs)):
+			#For the target, use all reference stars
+			ref_inds = np.arange(1,len(targ_and_refs))
+			#For the reference stars, use all other references and NOT the target
+			if l != 0:
+				ref_inds = np.delete(ref_inds,l-1)
+			for m in range(len(ap_radii)):
+				ensemble_alc_ADU[m,l,i] = sum(source_minus_sky_ADU[m,ref_inds,i])
+				ensemble_alc_err_ADU[m,l,i] = np.sqrt(np.sum(source_minus_sky_err_ADU[m,ref_inds,i]**2))
+				ensemble_alc_e[m,l,i] = sum(source_minus_sky_e[m,ref_inds,i])
+				ensemble_alc_err_e[m,l,i] = np.sqrt(np.sum(source_minus_sky_err_e[m,ref_inds,i]**2))
 
-		if k == 0:
-			alc_renorm_factor = np.mean(total_ref_ADU[k,0:i+1])
-			alc_norm = total_ref_ADU[k,0:i+1]/alc_renorm_factor
-			alc_norm_err = total_ref_err_ADU[k,0:i+1]/alc_renorm_factor
-			ax[0].errorbar(mjd_utc[0:i+1],alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ALC flux')
-			ax[0].set_ylim(0.97,1.03)
+				relative_flux[m,l,i] = source_minus_sky_ADU[m,l,i]/ensemble_alc_ADU[m,l,i]
+				relative_flux_err[m,l,i] = np.sqrt((source_minus_sky_err_ADU[m,l,i]/ensemble_alc_ADU[m,l,i])**2+(source_minus_sky_ADU[m,l,i]*ensemble_alc_err_ADU[m,l,i]/(ensemble_alc_ADU[m,l,i]**2))**2)
+
+		if live_plot:
+			alc_renorm_factor = np.mean(ensemble_alc_ADU[0,0,0:i+1]) #This means, grab the ALC associated with the 0th aperture for the 0th source (the target) in all images up to and including this one.
+			alc_norm = ensemble_alc_ADU[0,0,0:i+1]/alc_renorm_factor
+			alc_norm_err = ensemble_alc_err_ADU[0,0,0:i+1]/alc_renorm_factor
+			v,l,h=sigmaclip(alc_norm)
+			ax[0].errorbar(bjd_tdb[0:i+1],alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ALC flux')
+			ax[0].set_ylim(l,h)
 			ax[0].legend() 
 
 			corrected_flux = targ_norm/alc_norm
 			corrected_flux_err = np.sqrt((targ_norm_err/alc_norm)**2+(targ_norm*alc_norm_err/(alc_norm**2))**2)
 			v,l,h=sigmaclip(corrected_flux)
-			ax[1].errorbar(mjd_utc[0:i+1],corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Corrected target flux')
+			ax[1].errorbar(bjd_tdb[0:i+1],corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Corrected target flux')
 			ax[1].set_ylim(l,h)
 			ax[1].legend()
 			ax[1].set_ylabel('Normalized Flux')
-			ax[1].set_xlabel('Time (MJD UTC)')
+			ax[1].set_xlabel('Time (BJD$_{TDB}$)')
+			plt.tight_layout()
 			plt.pause(0.01)
 			ax[0].cla()
 			ax[1].cla()
@@ -911,6 +936,19 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 			output_list.append([f'{val:.4f}' for val in source_minus_sky_err_e[i,j]])
 			output_header.append(source_name+' Source-Sky Error e')
 
+			output_list.append([f'{val:.4f}' for val in ensemble_alc_ADU[i,j]])
+			output_header.append(source_name+' Ensemble ALC ADU')
+			output_list.append([f'{val:.4f}' for val in ensemble_alc_err_ADU[i,j]])
+			output_header.append(source_name+' Ensemble ALC Error ADU')
+			output_list.append([f'{val:.4f}' for val in ensemble_alc_e[i,j]])
+			output_header.append(source_name+' Ensemble ALC e')
+			output_list.append([f'{val:.4f}' for val in ensemble_alc_err_e[i,j]])
+			output_header.append(source_name+' Ensemble ALC Error e')
+			output_list.append([f'{val:.4f}' for val in relative_flux[i,j]])
+			output_header.append(source_name+' Relative Flux')
+			output_list.append([f'{val:.4f}' for val in relative_flux_err[i,j]])
+			output_header.append(source_name+' Relative Flux Error')
+
 			output_list.append([f'{val:.4f}' for val in source_sky_ADU[j]])
 			output_header.append(source_name+' Sky ADU')
 			output_list.append([f'{val:.4f}' for val in source_sky_e[j]])
@@ -928,14 +966,14 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 			output_list.append([f'{val:d}' for val in saturated_flags[i,j]])
 			output_header.append(source_name+' Saturated Flag')
 
-		output_list.append([f'{val:.4f}' for val in total_ref_ADU[i]])
-		output_header.append('Total Reference ADU')
-		output_list.append([f'{val:.4f}' for val in total_ref_err_ADU[i]])
-		output_header.append('Total Reference Error ADU')
-		output_list.append([f'{val:.4f}' for val in total_ref_e[i]])
-		output_header.append('Total Reference e')
-		output_list.append([f'{val:.4f}' for val in total_ref_err_e[i]])
-		output_header.append('Total Reference Error e')
+		# output_list.append([f'{val:.4f}' for val in total_ref_ADU[i]])
+		# output_header.append('Total Reference ADU')
+		# output_list.append([f'{val:.4f}' for val in total_ref_err_ADU[i]])
+		# output_header.append('Total Reference Error ADU')
+		# output_list.append([f'{val:.4f}' for val in total_ref_e[i]])
+		# output_header.append('Total Reference e')
+		# output_list.append([f'{val:.4f}' for val in total_ref_err_e[i]])
+		# output_header.append('Total Reference Error e')
 
 		output_df = pd.DataFrame(np.transpose(output_list),columns=output_header)
 		if not os.path.exists(output_path.parent.parent):
@@ -1115,8 +1153,8 @@ if __name__ == '__main__':
 
 	#plot_ref_positions(flattened_files, targ_and_refs)
 	
-	# ap_radii = np.arange(12,13)
-	# fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=40, an_out=80, save_target_cutout=False)
+	ap_radii = np.arange(12,14)
+	fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=40, an_out=80, save_target_cutout=False, live_plot=True)
 
 	lc_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/circular_fixed_ap_phot_12.csv'
 	plot_target_lightcurve(lc_path)
