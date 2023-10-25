@@ -4,7 +4,7 @@ from matplotlib.cm import get_cmap
 import matplotlib.pyplot as plt
 plt.ion()
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from astropy.visualization import ImageNormalize, ZScaleInterval
+from astropy.visualization import ImageNormalize, ZScaleInterval, simple_norm
 from astropy.convolution import Gaussian2DKernel
 from astropy.io import fits
 from astropy.wcs import WCS
@@ -33,6 +33,8 @@ import sep
 from fitsutil import *
 from pathlib import Path
 from sklearn import linear_model
+import copy
+import batman
 
 def get_flattened_files():
 	#Get a list of data files sorted by exposure number
@@ -494,8 +496,8 @@ def jd_utc_to_bjd_tdb(jd_utc, ra, dec, location='Whipple'):
     ltt_bary = input_jd_utc.light_travel_time(target)
     return (input_jd_utc.tdb + ltt_bary).value
 
-def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40,an_out=60, save_target_cutout=False, live_plot=False):
-	file_list = file_list[-5:] #TESTING!!!
+def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40,an_out=60, live_plot=False):
+	#file_list = file_list[-5:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
@@ -596,7 +598,9 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 	reference_image_data -= bkg.back()
 	
 	n_files = len(file_list)
-	fig, ax = plt.subplots(2,1,figsize=(10,9),sharex=True)
+	if live_plot:
+		fig, ax = plt.subplots(2,2,figsize=(16,9))
+
 	print(f'Doing fixed-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.\n')
 	time.sleep(2)
 	for i in range(n_files):
@@ -668,6 +672,7 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 		for j in range(len(targ_and_refs)):
 			source_x[j,i] = transformed_pixel_coordinates[j][0]
 			source_y[j,i] = transformed_pixel_coordinates[j][1]
+			
 
 		#DO PHOTOMETRY AT UPDATED SOURCE POSITIONS FOR ALL SOURCES AND ALL APERTURES
 		for j in range(len(targ_and_refs)):
@@ -719,14 +724,36 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 				an = CircularAnnulus((x_pos_cutout,y_pos_cutout),r_in=an_in,r_out=an_out)
 
 
-				if j == 0 and k == 0 and save_target_cutout:
-					plt.ioff()
-					plt.figure()
-					plt.imshow(cutout,origin='lower',interpolation='none',norm=ImageNormalize(cutout,interval=ZScaleInterval()))
-					ap.plot(color='r',lw=2)
-					an.plot(color='r',lw=2)
-					plt.savefig(cutout_output_path+date+'_'+target+'_'+str(i).zfill(4)+'.jpg',dpi=100)
-					plt.close()
+				if j == 0 and k == 0 and live_plot:
+					norm = simple_norm(cutout,'linear',min_percent=0,max_percent=98.5)
+					ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm,cmap='Greys_r')
+					#ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm)
+					ax[1,0].plot(x_pos_cutout,y_pos_cutout, color='m', marker='x',mew=1.5,ms=8)
+					ap_circle = plt.Circle((x_pos_cutout,y_pos_cutout),ap_radii[k],fill=False,color='m',lw=2)
+					an_in_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_in,fill=False,color='m',lw=2)
+					an_out_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_out,fill=False,color='m',lw=2)
+					ax[1,0].add_patch(ap_circle)
+					ax[1,0].add_patch(an_in_circle)
+					ax[1,0].add_patch(an_out_circle)
+					ax[1,0].set_xlim(0,cutout.shape[1])
+					ax[1,0].set_ylim(0,cutout.shape[0])
+					ax[1,0].grid(False)
+					ax[1,0].set_title('Target')
+
+					ax[0,0].imshow(source_data,origin='lower',interpolation='none',norm=norm, cmap='Greys_r')
+					ax[0,0].grid(False)
+					ax[0,0].set_title(file_list[i].split('/')[-1])
+					for l in range(len(source_x)):
+						if l == 0:
+							color = 'm'
+							name = 'T'
+						else:
+							color = 'tab:red'
+							name = f'R{l}'
+						ap_circle = plt.Circle((source_x[l,i],source_y[l,i]),30,fill=False,color=color,lw=1)
+						ax[0,0].add_patch(ap_circle)
+						ax[0,0].text(source_x[l,i]+15,source_y[l,i]+15,name,color=color,fontsize=14)
+
 
 				source_radii[k,i] = ap_radii[k]
 				an_in_radii[k,i] = an_in
@@ -812,9 +839,9 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 					targ_norm = source_minus_sky_ADU[k,j,0:i+1]/target_renorm_factor
 					targ_norm_err = source_minus_sky_err_ADU[k,j,0:i+1]/target_renorm_factor
 					
-					ax[0].errorbar(bjd_tdb[0:i+1],targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k',label='Normalized target flux')
+					ax[0,1].errorbar(bjd_tdb[0:i+1],targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k',label='Normalized target flux')
 					#plt.ylim(380000,440000)
-					ax[0].set_ylabel('Normalized Flux')
+					ax[0,1].set_ylabel('Normalized Flux')
 					
 
 				# #Create first-order ALC by summing all reference counts (by convention, positions 1: in our arrays)
@@ -844,22 +871,24 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 			alc_norm = ensemble_alc_ADU[0,0,0:i+1]/alc_renorm_factor
 			alc_norm_err = ensemble_alc_err_ADU[0,0,0:i+1]/alc_renorm_factor
 			v,l,h=sigmaclip(alc_norm)
-			ax[0].errorbar(bjd_tdb[0:i+1],alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ALC flux')
-			ax[0].set_ylim(l,h)
-			ax[0].legend() 
+			ax[0,1].errorbar(bjd_tdb[0:i+1],alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ALC flux')
+			ax[0,1].set_ylim(l,h)
+			ax[0,1].legend() 
 
 			corrected_flux = targ_norm/alc_norm
 			corrected_flux_err = np.sqrt((targ_norm_err/alc_norm)**2+(targ_norm*alc_norm_err/(alc_norm**2))**2)
 			v,l,h=sigmaclip(corrected_flux)
-			ax[1].errorbar(bjd_tdb[0:i+1],corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Corrected target flux')
-			ax[1].set_ylim(l,h)
-			ax[1].legend()
-			ax[1].set_ylabel('Normalized Flux')
-			ax[1].set_xlabel('Time (BJD$_{TDB}$)')
-			plt.tight_layout()
+			ax[1,1].errorbar(bjd_tdb[0:i+1],corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Corrected target flux')
+			ax[1,1].set_ylim(l,h)
+			ax[1,1].legend()
+			ax[1,1].set_ylabel('Normalized Flux')
+			ax[1,1].set_xlabel('Time (BJD$_{TDB}$)')
+			#plt.tight_layout()
 			plt.pause(0.01)
-			ax[0].cla()
-			ax[1].cla()
+			ax[0,0].cla()
+			ax[1,0].cla()
+			ax[0,1].cla()
+			ax[1,1].cla()
 
 	#Write out photometry. 
 	for i in range(len(ap_radii)):
@@ -984,7 +1013,7 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 
 	return 
 
-def plot_target_lightcurve(file_path):
+def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.001):
 	df = pd.read_csv(file_path)
 	times = np.array(df['BJD TDB'])
 	x_offset =  int(np.floor(times[0]))
@@ -992,15 +1021,17 @@ def plot_target_lightcurve(file_path):
 
 	targ_flux = np.array(df['Target Source-Sky ADU'])
 	targ_flux_err = np.array(df['Target Source-Sky Error ADU'])
-	alc_flux = np.array(df['Total Reference ADU'])
-	alc_flux_err = np.array(df['Total Reference Error ADU'])
+	alc_flux = np.array(df['Target Ensemble ALC ADU'])
+	alc_flux_err = np.array(df['Target Ensemble ALC Error ADU'])
 
-	airmass = np.array(df['Airmass'])
-	sky = np.array(df['Target Sky ADU'])
-	x_centroid = np.array(df['Target X'])
-	y_centroid = np.array(df['Target Y'])
-	x_fwhm = np.array(df['Target X FWHM Arcsec'])
-	y_fwhm = np.array(df['Target Y FWHM Arcsec'])
+	#Set up dictionary containing ancillary data to check for significant correlations
+	ancillary_dict = {}
+	ancillary_dict['Airmass'] = np.array(df['Airmass'])
+	ancillary_dict['Target Sky ADU'] = np.array(df['Target Sky ADU'])
+	ancillary_dict['Target X'] = np.array(df['Target X'])
+	ancillary_dict['Target Y'] = np.array(df['Target Y'])
+	ancillary_dict['Target X FWHM Arcsec'] = np.array(df['Target X FWHM Arcsec'])
+	ancillary_dict['Target Y FWHM Arcsec'] = np.array(df['Target Y FWHM Arcsec'])
 
 	v1,l1,h1 = sigmaclip(targ_flux)
 	v2,l2,h2 = sigmaclip(alc_flux)
@@ -1010,12 +1041,9 @@ def plot_target_lightcurve(file_path):
 	targ_flux_err = targ_flux_err[use_inds]
 	alc_flux = alc_flux[use_inds]
 	alc_flux_err = alc_flux_err[use_inds]
-	airmass = airmass[use_inds]
-	sky = sky[use_inds]
-	x_centroid = x_centroid[use_inds]
-	y_centroid = y_centroid[use_inds]
-	x_fwhm = x_fwhm[use_inds]
-	y_fwhm = y_fwhm[use_inds]
+
+	for key in ancillary_dict.keys():
+		ancillary_dict[key] = ancillary_dict[key][use_inds]
 
 	targ_flux_norm_factor = np.median(targ_flux)
 	targ_flux_norm = targ_flux / targ_flux_norm_factor
@@ -1041,19 +1069,19 @@ def plot_target_lightcurve(file_path):
 	ax[1].tick_params(labelsize=14)
 	ax[1].set_ylabel('Normalized Flux',fontsize=16)
 	
-	ax[2].plot(times,airmass, color='tab:blue',lw=2)
+	ax[2].plot(times,ancillary_dict['Airmass'], color='tab:blue',lw=2)
 	ax[2].tick_params(labelsize=14)
 	ax[2].set_ylabel('Airmass',fontsize=14)
 
-	ax[3].plot(times,sky,color='tab:orange',lw=2)
+	ax[3].plot(times,ancillary_dict['Target Sky ADU'],color='tab:orange',lw=2)
 	ax[3].tick_params(labelsize=14)
 	ax[3].set_ylabel('Sky (ADU/pix)',fontsize=14)
 
-	ax[4].plot(times,x_centroid,color='tab:green',lw=2)
+	ax[4].plot(times,ancillary_dict['Target X'],color='tab:green',lw=2)
 	ax[4].tick_params(labelsize=14)
 	ax[4].set_ylabel('X',fontsize=14)
 
-	ax[5].plot(times,y_centroid,color='tab:red',lw=2)
+	ax[5].plot(times,ancillary_dict['Target Y'],color='tab:red',lw=2)
 	ax[5].tick_params(labelsize=14)
 	ax[5].set_ylabel('Y',fontsize=14)
 
@@ -1061,46 +1089,70 @@ def plot_target_lightcurve(file_path):
 
 	plt.tight_layout()
 
-	regr = linear_model.LinearRegression()
-	regress_dict = {}
-	regress_dict['sky'] = sky 
-	regress_dict['airmass'] = airmass	
-	regress_dict['x'] = x_centroid
-	regress_dict['x_fwhm'] = x_fwhm
-	regress_dict['y_fwhm'] = y_fwhm
-	regress_dict['flux'] = corrected_targ_flux
-	keylist = list(regress_dict.keys())
-	
-	df = pd.DataFrame(regress_dict, columns=list(regress_dict.keys()))
-	x = df[keylist[0:len(keylist)-1]]
-	y = df['flux']
-	regr.fit(x,y)
-	regression_model = regr.intercept_
-	for i in range(len(keylist[:-1])):
-		regression_model += regr.coef_[i]*regress_dict[keylist[i]]
+	if regression:
+		regr = linear_model.LinearRegression()
+		regress_dict = {}
+		#Check for significant correlations between ancillary data and corrected target flux
+		for key in ancillary_dict:
+			try:
+				corr, pvalue = pearsonr(corrected_targ_flux,ancillary_dict[key])
+			except:
+				continue
+			if pvalue < pval_threshold:
+				regress_dict[key] = ancillary_dict[key]
+				print(f'{key}, corr:{corr:.2f}, P-value: {pvalue:.2E}')
+		  
+		regress_dict['flux'] = corrected_targ_flux
+		keylist = list(regress_dict.keys())
+		
+		df = pd.DataFrame(regress_dict, columns=list(regress_dict.keys()))
+		x = df[keylist[0:len(keylist)-1]]
+		y = df['flux']
+		regr.fit(x,y)
+		regression_model = regr.intercept_
+		for i in range(len(keylist[:-1])):
+			regression_model += regr.coef_[i]*regress_dict[keylist[i]]
 
-	ax[1].plot(times, regression_model, lw=2, zorder=4)
+		ax[1].plot(times, regression_model, lw=2, zorder=4)
+
+		plt.figure()
+		regressed_flux = corrected_targ_flux/regression_model
+		regressed_flux /= np.mean(regressed_flux[np.where(times>0.72)[0]])	
+		# coeffs = np.polyfit(times[np.where(times>0.72)[0]],regressed_flux[np.where(times>0.72)[0]],1)
+		# fit = times*coeffs[0]+coeffs[1]
+		# regressed_flux /= fit
+		points_to_bin = 100
+		n_bins = int(np.ceil(len(times)/points_to_bin))
+		bx = np.zeros(n_bins)
+		by = np.zeros(n_bins)
+		bye = np.zeros(n_bins)
+		for i in range(n_bins):
+			if i == n_bins-1:
+				bin_inds = np.arange(i*points_to_bin,len(times))
+			else:
+				bin_inds = np.arange(i*points_to_bin,(i+1)*points_to_bin)
+			bx[i] = np.mean(times[bin_inds])
+			by[i] = np.mean(regressed_flux[bin_inds])
+			bye[i] = np.std(regressed_flux[bin_inds])/np.sqrt(len(bin_inds))
+		plt.plot(times, regressed_flux, marker='.',color='#b0b0b0',ls='')
+		plt.errorbar(bx, by, bye, marker='o', color='none', mec='k', ecolor='k', mew=2, ls='', zorder=3)
+	
+	planet_model = transit_model(times, 2459510.82759-x_offset, 22.09341, 0.0424, 21.53, 87.93, 0, 0, 0.209, 0.314)
+	plt.plot(times, planet_model, lw=2)
+	plt.ylim(0.991,1.009)
+	plt.xlim(times[0],times[-1])
+
+	#Do bin plot
+	bins = np.arange(0.5,20.5,0.5)
+	std, theo = juliana_binning(bins, times, corrected_targ_flux, corrected_targ_flux_err)
 
 	plt.figure()
-	regressed_flux = corrected_targ_flux/regression_model
-	regressed_flux /= np.mean(regressed_flux[np.where(times>0.72)[0]])	
-	points_to_bin = 100
-	n_bins = int(np.ceil(len(times)/points_to_bin))
-	bx = np.zeros(n_bins)
-	by = np.zeros(n_bins)
-	bye = np.zeros(n_bins)
-	for i in range(n_bins):
-		if i == n_bins-1:
-			bin_inds = np.arange(i*points_to_bin,len(times))
-		else:
-			bin_inds = np.arange(i*points_to_bin,(i+1)*points_to_bin)
-		bx[i] = np.mean(times[bin_inds])
-		by[i] = np.mean(regressed_flux[bin_inds])
-		bye[i] = np.std(regressed_flux[bin_inds])/np.sqrt(len(bin_inds))
-	plt.plot(times, regressed_flux, marker='.',color='#b0b0b0',ls='')
-	plt.errorbar(bx, by, bye, marker='o', color='none', mec='k', ecolor='k', mew=2, ls='', zorder=3)
+	plt.plot(bins, std[1:]*1e6, lw=2,label='Measured')
+	plt.plot(bins, theo[1:]*1e6,lw=2,label='Theoretical')
+	plt.xlabel('Bin size (min)',fontsize=14)
+	plt.ylabel('$\sigma$ (ppm)',fontsize=14)
+	plt.legend()
 	breakpoint()
-
 
 def plot_ref_positions(file_list, targ_and_refs):
 	im = fits.open(file_list[5])[0].data
@@ -1110,6 +1162,52 @@ def plot_ref_positions(file_list, targ_and_refs):
 		ax.plot(targ_and_refs['x'][i], targ_and_refs['y'][i],'rx')
 		ax.text(targ_and_refs['x'][i]+5, targ_and_refs['y'][i]+5, f'R{i}',fontsize=14,color='r')
 	return 
+
+def juliana_binning(binsize, times, flux, flux_err):
+    '''Bins up a Tierras light curve following example from testextract.py 
+
+    times: array of times in days
+    
+    '''
+    std = np.empty([len(binsize)+1])
+    decstd = np.empty([len(binsize)+1])
+    theo = np.empty([len(binsize)+1])
+
+    for ibinsize, thisbinsize in enumerate(binsize):
+
+        nbin = (times[-1] - times[0]) * 1440.0 / thisbinsize
+
+        bins = times[0] + thisbinsize * np.arange(nbin+1) / 1440.0
+        
+        wt = 1.0 / np.square(flux_err)
+        
+        ybn = np.histogram(times, bins=bins, weights=flux*wt)[0]
+        #ybnd = np.histogram(times, bins=bins, weights=decflux*wt)[0]
+        ybd = np.histogram(times, bins=bins, weights=wt)[0]
+        
+        wb = ybd > 0
+        
+        binned_flux = ybn[wb] / ybd[wb]
+        #binned_decflux = ybnd[wb] / ybd[wb]
+
+        std[ibinsize+1] = np.std(binned_flux)
+        #decstd[ibinsize+1] = np.std(binned_decflux)
+        theo[ibinsize+1] = np.sqrt(np.mean(1.0 / ybd[wb]))
+    return std, theo
+
+def transit_model(times, T0,P,Rp,a,inc,ecc,w,u1,u2):
+	params = batman.TransitParams()
+	params.t0 = T0
+	params.per = P #orbital period in days
+	params.rp = Rp #planet radius in units of stellar radii 
+	params.a = a #semi-major axis in units of stellar radii 
+	params.inc = inc #inclination in degrees
+	params.ecc = ecc
+	params.w = w #longitude of periastron in degrees\
+	params.u = [u1,u2] #limb darkening coeffs
+	params.limb_dark = 'quadratic'
+	m = batman.TransitModel(params, times)    #initializes model
+	return m.light_curve(params)
 
 if __name__ == '__main__':
 	ap = argparse.ArgumentParser()
@@ -1153,11 +1251,11 @@ if __name__ == '__main__':
 
 	#plot_ref_positions(flattened_files, targ_and_refs)
 	
-	ap_radii = np.arange(12,14)
-	fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=40, an_out=80, save_target_cutout=False, live_plot=True)
+	ap_radii = np.arange(14,17)
+	fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=40, an_out=80, live_plot=True)
 
-	lc_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/circular_fixed_ap_phot_12.csv'
-	plot_target_lightcurve(lc_path)
+	lc_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/circular_fixed_ap_phot_15.csv'
+	plot_target_lightcurve(lc_path,regression=True)
 	
 	breakpoint()
 	
