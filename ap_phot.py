@@ -65,7 +65,7 @@ def plot_image(data,use_wcs=False,scale='zscale',cmap_name='viridis'):
 
 	norm = simple_norm(data, stretch='linear', min_percent=1,max_percent=99.9)
 	cmap = get_cmap(cmap_name)
-	im_scale = 2.5
+	im_scale = 2
 	
 	if use_wcs:
 		fig, ax = plt.subplots(1,1,figsize=(im_scale*8,im_scale*4),subplot_kw={'projection':wcs})
@@ -361,8 +361,21 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 				plt.savefig(reference_file_path.parent/(f'{target}_target_and_refs.png'),dpi=300)
 				plt.close()
 		
-		df = pd.DataFrame(targ_and_refs)
+		#df = pd.DataFrame(targ_and_refs)
+		output_dict = {}
+		output_dict['x'] = [f'{val:0.4f}' for val in targ_and_refs['x']]
+		output_dict['y'] = [f'{val:0.4f}' for val in targ_and_refs['y']]
+		coords = [wcs.pixel_to_world(targ_and_refs['x'][i],targ_and_refs['y'][i]) for i in range(len(targ_and_refs))]
+		ras_deg = [coords[i].ra.value for i in range(len(coords))]
+		decs_deg = [coords[i].dec.value for i in range(len(coords))]
+		output_dict['ra'] = [f'{val:.5f}' for val in ras_deg]
+		output_dict['dec'] = [f'{val:.5f}' for val in decs_deg]
+		df = pd.DataFrame(output_dict)
 		df.to_csv(reference_file_path, index=False)
+
+		#Query Gaia for information about sources. 
+
+		breakpoint()
 	else:
 		print(f'Restoring target/reference star positions from {reference_file_path}')
 		df = pd.read_csv(reference_file_path)
@@ -522,9 +535,9 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 	SATURATION_TRESHOLD = 55000. #ADU
 	PLATE_SCALE = 0.43 #arcsec pix^-1, from Juliana's dissertation Table 1.1
 	
-	cutout_output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/target_cutouts/'
-	if not os.path.exists(cutout_output_path):
-		os.mkdir(cutout_output_path)
+	# cutout_output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/target_cutouts/'
+	# if not os.path.exists(cutout_output_path):
+	# 	os.mkdir(cutout_output_path)
 	#Set up arrays for doing photometry 
 
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH FILE
@@ -1080,8 +1093,8 @@ def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.001):
 	ancillary_dict['Target X FWHM Arcsec'] = np.array(df['Target X FWHM Arcsec'])
 	ancillary_dict['Target Y FWHM Arcsec'] = np.array(df['Target Y FWHM Arcsec'])
 
-	v1,l1,h1 = sigmaclip(targ_flux)
-	v2,l2,h2 = sigmaclip(alc_flux)
+	v1,l1,h1 = sigmaclip(targ_flux,3,3)
+	v2,l2,h2 = sigmaclip(alc_flux,3,3)
 	use_inds = np.where((targ_flux>l1)&(targ_flux<h1)&(alc_flux>l2)&(alc_flux<h2))[0]
 	times = times[use_inds]
 	targ_flux = targ_flux[use_inds]
@@ -1419,7 +1432,13 @@ if __name__ == '__main__':
 	#Define base paths
 	fpath = '/data/tierras/flattened'
 	lcpath = '/data/tierras/lightcurves'
-	
+	if not os.path.exists(lcpath+f'/{date}'):
+		os.mkdir(lcpath+f'/{date}')
+	if not os.path.exists(lcpath+f'/{date}/{target}'):
+		os.mkdir(lcpath+f'/{date}/{target}')
+	if not os.path.exists(lcpath+f'/{date}/{target}/{ffname}'):
+		os.mkdir(lcpath+f'/{date}/{target}/{ffname}')
+
 	#hdu = fits.open('/data/tierras/flattened/20230919/2MASSJ23373601+/flat0000/20230919.0284.2MASSJ23373601+_red.fit')[0]
 	#data = hdu.data
 	#header = hdu.header
@@ -1442,15 +1461,13 @@ if __name__ == '__main__':
 	# ax[1].set_title('20 images stacked on reference image')
 	# plt.tight_layout()
 	
-	targ_and_refs = reference_star_chooser(flattened_files, mode='manual', plot=True, nearness_limit=12, edge_limit=40,dimness_limit=0.01, targ_distance_limit=3000, overwrite=False)
+	targ_and_refs = reference_star_chooser(flattened_files, mode='manual', plot=True, nearness_limit=12, edge_limit=40,dimness_limit=0.01, targ_distance_limit=3000, overwrite=True)
 
-
-	ap_radii = ap_range(flattened_files, targ_and_refs)
+	# ap_radii = ap_range(flattened_files, targ_and_refs)
 
 	# fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=40, an_out=80, centroid=True, live_plot=True)
 
 	optimal_lc_path = optimal_lc_chooser(date,target,ffname,plot=True)
-
 
 	plot_target_lightcurve(optimal_lc_path, regression=True)
 	
