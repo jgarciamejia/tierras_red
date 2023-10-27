@@ -6,6 +6,7 @@ plt.ion()
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from astropy.visualization import ImageNormalize, ZScaleInterval, simple_norm
 from astropy.convolution import Gaussian2DKernel
+from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.stats import SigmaClip, sigma_clipped_stats
@@ -13,6 +14,9 @@ from astropy.modeling import models, fitting
 from astropy import coordinates as coord
 from astropy import units as u
 from astropy.time import Time
+import astropy.units as u 
+from astroquery.gaia import Gaia
+Gaia.MAIN_GAIA_TABLE = 'gaiadr3.gaia_source'
 from photutils import make_source_mask
 from photutils.detection import DAOStarFinder, IRAFStarFinder
 from photutils.background import Background2D, MedianBackground
@@ -370,16 +374,53 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 		decs_deg = [coords[i].dec.value for i in range(len(coords))]
 		output_dict['ra'] = [f'{val:.5f}' for val in ras_deg]
 		output_dict['dec'] = [f'{val:.5f}' for val in decs_deg]
-		df = pd.DataFrame(output_dict)
-		df.to_csv(reference_file_path, index=False)
+		
 
 		#Query Gaia for information about sources. 
+		gaia_ids = []
+		parallaxes = np.zeros(len(targ_and_refs))
+		pmras = np.zeros(len(targ_and_refs))
+		pmdecs = np.zeros(len(targ_and_refs))
+		ruwes = np.zeros(len(targ_and_refs))
+		bp_rps = np.zeros(len(targ_and_refs))
+		#TODO: What other parameters should be saved?
+		#TODO: What happens if no sources are found? If more than one are found?
+		print('Querying target and references in Gaia DR3...')
+		time.sleep(2)
+		for i in range(len(targ_and_refs)):
+			print(f'{i+1} of {len(targ_and_refs)}')
+			coord = SkyCoord(ras_deg[i],decs_deg[i],unit=(u.degree,u.degree))
+			result = Gaia.cone_search_async(coordinate=coord, radius=u.Quantity(1.0, u.arcsec)).get_results()
+			if len(result) == 0:
+				print('No object found...')
+				#result = Gaia.cone_search_async(coordinate=coord, radius=u.Quantity(2.0, u.arcsec)).get_results()
+				breakpoint()
+			if len(result) > 1:
+				print('More than one object found...')
+				breakpoint()
+			else:
+				ind = 0 
+			gaia_ids.append(result[ind]['source_id'])
+			parallaxes[i] = result[ind]['parallax']
+			pmras[i] = result[ind]['pmra']
+			pmdecs[i] = result[ind]['pmdec']
+			ruwes[i] = result[ind]['ruwe']
+			bp_rps[i] = result[ind]['bp_rp']
 
-		breakpoint()
+		output_dict['gaia id'] = gaia_ids
+		output_dict['parallax'] = [f'{val:0.5f}' for val in parallaxes]
+		output_dict['pmra'] =  [f'{val:0.5f}' for val in pmras]
+		output_dict['pmdec'] =  [f'{val:0.5f}' for val in pmdecs]
+		output_dict['pmdec'] =  [f'{val:0.5f}' for val in pmdecs]
+		output_dict['ruwe'] =  [f'{val:0.4f}' for val in ruwes]
+		output_dict['bp_rp'] =  [f'{val:0.4f}' for val in bp_rps]
+
+		output_df = pd.DataFrame(output_dict)
+		output_df.to_csv(reference_file_path, index=False)
 	else:
 		print(f'Restoring target/reference star positions from {reference_file_path}')
-		df = pd.read_csv(reference_file_path)
-	return df
+		output_df = pd.read_csv(reference_file_path)
+	return output_df
 
 def load_bad_pixel_mask():
 	#Load in the BPM. Code stolen from imred.py.
