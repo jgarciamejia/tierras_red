@@ -28,13 +28,12 @@ from scipy.spatial.distance import cdist
 from scipy.signal import correlate2d, fftconvolve, savgol_filter
 from copy import deepcopy
 import argparse
-import pdb 
 import os 
 import sys
 import lfa
 import time
 import astroalign as aa
-import reproject as rp
+#import reproject as rp
 import sep 
 from fitsutil import *
 from pathlib import Path
@@ -46,6 +45,17 @@ import pickle
 
 def get_flattened_files(date, target, ffname):
 	#Get a list of data files sorted by exposure number
+	'''
+		PURPOSE: 
+			Creates a list of flattened files associated with an input date, target, and ffname
+		INPUTS:
+			date (str): the dates of the observations in calendar YYYYMMDD format
+			target (str): the name of the target
+			ffname (str): the name of the flat field file
+		OUTPUTS:
+			sorted_files (numpy array): array of flattened files ordered by exposure number
+	'''
+
 	ffolder = fpath+'/'+date+'/'+target+'/'+ffname
 	red_files = []
 	for file in os.listdir(ffolder): 
@@ -55,15 +65,21 @@ def get_flattened_files(date, target, ffname):
 	sorted_files = np.array([Path(i) for i in sorted_files])
 	return sorted_files 
 
-def plot_image(data,use_wcs=False,scale='zscale',cmap_name='viridis'):
-	#Do a quick plot of a Tierras image
+def plot_image(data,use_wcs=False,cmap_name='viridis'):
+	'''
+		PURPOSE: 
+			Does a quick plot of a Tierras image (or any 2D array)
+		INPUTS:
+			data (2D array): array of data to be plotted 
+			use_wcs (bool): whether or not to plot using WCS coordinates instead of pixel (TODO: this is currently broken)
+			cmap_name (str): the name of whatever pyplot colormap you want to use
+		OUTPUTS:
+			fig, ax (matplotlib objects): the figure/axis objects associated with the plot
+
+	'''
 
 	#TODO: Do we want the image orientation to match the orientation on-sky? 
-	#TODO: WCS and pixel coordinates simultaneously? 
-
-	#TODO: support for other image scalings.
-	if scale == 'zscale':
-		interval=ZScaleInterval()
+	#TODO: WCS and pixel coordinates simultaneously?
 	
 	#if use_wcs:
 	#	wcs = WCS(header)
@@ -113,101 +129,18 @@ def plot_image(data,use_wcs=False,scale='zscale',cmap_name='viridis'):
 	plt.tight_layout()
 	return fig, ax
 
-def orient_on_sky(data,header):
-	#Flip a Tierras image so that it matches its on-sky orientation.
-	#TODO: how do you also flip the WCS information????
-	fig, ax = plot_image(data, header, use_wcs=True)
-
-	data2 = np.flipud(data)
-	fig2, ax2 = plot_image(data2, header, use_wcs=True)
-
-	data3 = np.rot90(data2, k=1)
-	fig3, ax3 = plot_image(data3, header, use_wcs=True)
-
-	pdb.set_trace()
-	return
-
-def detect_sources(data,header,mode='auto',model_bkg=False,plot=False):
-	#Detect stars in a Tierras image. 
-	#mode can be 'auto' or 'user'
-	#TODO: Self-calibrate to set properties of the starfinding algorithm
-
-	if mode == 'user':
-		print('User mode not yet implemented!')
-		return
-
-	wcs = WCS(header)
-
-	if model_bkg:
-		#Do a 2D MedianBackground model and remove it to facilitate source detection.
-		print('Modeling background...')
-		sigma_clip = SigmaClip(sigma=3.0)
-		bkg_estimator = MedianBackground()
-		bkg = Background2D(data, (50, 50), filter_size=(9, 9),
-					sigma_clip=sigma_clip, bkg_estimator=bkg_estimator)
-	
-		data = deepcopy(data-bkg.background)
-
-	#Get sigma-clipped median and stddev on background-subtracted data
-	vals, lo, hi = sigmaclip(data,low=4,high=4)
-	med = np.median(vals)
-	std = np.std(vals)
-
-	print('Detecting sources...')
-	#finder = DAOStarFinder(fwhm=4.0, threshold=5.0*std,ratio=0.5,theta=135,roundhi=0.7,sharphi=0.8)
-	finder = IRAFStarFinder(fwhm=4.0, threshold=8.0*std,roundhi=0.7)
-	sources = finder(data-med)
-
-	#Deal with any sources in two bad regions on the detector.
-	bad_inds_1 = np.where((1449 <= sources['xcentroid']) & (sources['xcentroid'] < 1453))[0]
-	bad_inds_2 = np.where((1791 <= sources['xcentroid']) & (sources['xcentroid'] < 1794) & (sources['ycentroid'] >= 1023))[0]
-	bad_inds_3 = np.where((sources['xcentroid']>= 4089))[0] #Remove some near x edges
-	bad_inds = np.concatenate((bad_inds_1,bad_inds_2,bad_inds_3))
-	sources.remove_rows(bad_inds)
-	
-	#Convert to a pandas dataframe 
-	source_df = sources.to_pandas()
-
-	#Resort based on flux 
-	source_df.sort_values('flux',ascending=False).reset_index()
-	
-	positions = np.transpose((source_df['xcentroid'], source_df['ycentroid']))  
-
-	#Identify target from header
-	#TODO: Where do CAT-RA and CAT-DEC come from? Do we need to apply proper motion?
-	#TODO: What happens if no source is found near the target position?
-	catra = header['CAT-RA']
-	catde = header['CAT-DEC']
-	cateq = float(header['CAT-EQUI'])
-	if cateq == 0:
-		sys.exit(1)
-	ratarg, rv = lfa.base60_to_10(catra, ":", lfa.UNIT_HR, lfa.UNIT_RAD)
-	detarg, rv = lfa.base60_to_10(catde, ":", lfa.UNIT_DEG, lfa.UNIT_RAD)
-
-	xtarg, ytarg = wcs.all_world2pix(ratarg * lfa.RAD_TO_DEG, detarg * lfa.RAD_TO_DEG, 1)
-	target_id = np.argmin(cdist(np.array((xtarg,ytarg)).reshape(1,-1),positions))
-
-	#Move the target to the first entry in the dataframe
-	source_df = pd.concat([source_df.iloc[[target_id],:], source_df.drop(target_id, axis=0)], axis=0).reset_index()
-
-	if plot:
-		fig, ax = plot_image(data,header,use_wcs=False)
-
-		#Plot source indicators 
-		for i in range(len(sources)):
-			if i == target_id:
-				indicator_color = 'b'
-			else:
-				indicator_color = 'r'
-			circ_rad = 14
-			circle = plt.Circle(positions[i], 14, color=indicator_color, fill=False, lw=1.5, alpha=0.5)
-			ax.add_patch(circle)
-			ax.plot([sources['xcentroid'][i]-circ_rad,sources['xcentroid'][i]+circ_rad],[sources['ycentroid'][i],sources['ycentroid'][i]],color=indicator_color,lw=1.5,alpha=0.5)
-			ax.plot([sources['xcentroid'][i],sources['xcentroid'][i]],[sources['ycentroid'][i]-circ_rad,sources['ycentroid'][i]+circ_rad],color=indicator_color,lw=1.5,alpha=0.5)
-
-	return source_df
-
 def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=False, nonlinear_limit=40000, dimness_limit=0.05, nearness_limit=15, edge_limit=50, targ_distance_limit=4000, nrefs=1000):
+	'''
+		PURPOSE: 
+			Does a quick plot of a Tierras image (or any 2D array)
+		INPUTS:
+			data (2D array): array of data to be plotted 
+			use_wcs (bool): whether or not to plot using WCS coordinates instead of pixel (TODO: this is currently broken)
+			cmap_name (str): the name of whatever pyplot colormap you want to use
+		OUTPUTS:
+			fig, ax (matplotlib objects): the figure/axis objects associated with the plot
+
+	'''
 	
 	#Start by checking for existing csv file about target/reference positions
 	reference_file_path = Path('/data/tierras/targets/'+target+'/'+target+'_target_and_ref_stars.csv')
