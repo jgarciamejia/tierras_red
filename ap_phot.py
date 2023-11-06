@@ -304,7 +304,9 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 					for i in range(1, len(targ_and_refs)):
 						ax.text(targ_and_refs['x'][i]+5,targ_and_refs['y'][i]+5,f'R{i}',color='r',fontsize=14,)
 
-				plt.savefig(reference_file_path.parent/(f'{target}_target_and_refs.png'),dpi=300)
+				reference_field_path = reference_file_path.parent/(f'{target}_target_and_refs.png')
+				plt.savefig(reference_field_path,dpi=300)
+				os.chmod(reference_field_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 				plt.close()
 		
 		#df = pd.DataFrame(targ_and_refs)
@@ -643,6 +645,7 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 	n_files = len(file_list)
 	if live_plot:
 		fig, ax = plt.subplots(2,2,figsize=(16,9))
+		ap_plot_ind = int(len(ap_radii)/2) #Set the central aperture as the one to plot
 
 	print(f'Doing fixed-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.\n')
 	time.sleep(2)
@@ -792,7 +795,7 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 				an = CircularAnnulus((x_pos_cutout,y_pos_cutout),r_in=an_in,r_out=an_out)
 
 
-				if j == 0 and k == 0 and live_plot:
+				if j == 0 and k == ap_plot_ind and live_plot:
 					norm = simple_norm(cutout,'linear',min_percent=0,max_percent=99.5)
 					ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm,cmap='Greys_r')
 					#ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm)
@@ -921,15 +924,14 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 					# plt.tight_layout()
 
 				#Plot normalized target source-sky as you go along
-				if live_plot and j == 0 and k == 0:
+				if live_plot and j == 0 and k == ap_plot_ind:
 					target_renorm_factor = np.nanmean(source_minus_sky_ADU[k,j,0:i+1])
 					targ_norm = source_minus_sky_ADU[k,j,0:i+1]/target_renorm_factor
 					targ_norm_err = source_minus_sky_err_ADU[k,j,0:i+1]/target_renorm_factor
 					
-					ax[0,1].errorbar(bjd_tdb[0:i+1],targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k',label='Normalized target flux')
+					ax[0,1].errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k',label='Normalized target flux')
 					#plt.ylim(380000,440000)
 					ax[0,1].set_ylabel('Normalized Flux')
-					
 		
 		#Create ensemble ALCs (summed reference fluxes with no weighting) for each source
 		for l in range(len(targ_and_refs)):
@@ -948,11 +950,11 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 				relative_flux_err[m,l,i] = np.sqrt((source_minus_sky_err_ADU[m,l,i]/ensemble_alc_ADU[m,l,i])**2+(source_minus_sky_ADU[m,l,i]*ensemble_alc_err_ADU[m,l,i]/(ensemble_alc_ADU[m,l,i]**2))**2)
 
 		if live_plot:
-			alc_renorm_factor = np.nanmean(ensemble_alc_ADU[0,0,0:i+1]) #This means, grab the ALC associated with the 0th aperture for the 0th source (the target) in all images up to and including this one.
-			alc_norm = ensemble_alc_ADU[0,0,0:i+1]/alc_renorm_factor
-			alc_norm_err = ensemble_alc_err_ADU[0,0,0:i+1]/alc_renorm_factor
+			alc_renorm_factor = np.nanmean(ensemble_alc_ADU[ap_plot_ind,0,0:i+1]) #This means, grab the ALC associated with the ap_plot_ind'th aperture for the 0th source (the target) in all images up to and including this one.
+			alc_norm = ensemble_alc_ADU[ap_plot_ind,0,0:i+1]/alc_renorm_factor
+			alc_norm_err = ensemble_alc_err_ADU[ap_plot_ind,0,0:i+1]/alc_renorm_factor
 			v,l,h=sigmaclip(alc_norm[~np.isnan(alc_norm)])
-			ax[0,1].errorbar(bjd_tdb[0:i+1],alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ALC flux')
+			ax[0,1].errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ALC flux')
 			try:
 				ax[0,1].set_ylim(l,h)
 			except:
@@ -962,13 +964,13 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 			corrected_flux = targ_norm/alc_norm
 			corrected_flux_err = np.sqrt((targ_norm_err/alc_norm)**2+(targ_norm*alc_norm_err/(alc_norm**2))**2)
 			v,l,h=sigmaclip(corrected_flux)
-			ax[1,1].errorbar(bjd_tdb[0:i+1],corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Corrected target flux')
-			#ax[1,1].set_ylim(l,h)
-			ax[1,1].set_ylim(0.9826,1.0108)
+			ax[1,1].errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Corrected target flux')
+			ax[1,1].set_ylim(l,h)
 			ax[1,1].legend()
 			ax[1,1].set_ylabel('Normalized Flux')
-			ax[1,1].set_xlabel('Time (BJD$_{TDB}$)')
+			ax[1,1].set_xlabel(f'Time - {int(bjd_tdb[0]):d}'+' (BJD$_{TDB}$)')
 			#plt.tight_layout()
+			plt.suptitle(f'{i+1} of {n_files}')
 			plt.pause(0.01)
 			ax[0,0].cla()
 			ax[1,0].cla()
@@ -1092,10 +1094,14 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 		output_df = pd.DataFrame(np.transpose(output_list),columns=output_header)
 		if not os.path.exists(output_path.parent.parent):
 			os.mkdir(output_path.parent.parent)
+			os.chmod(output_path.parent.parent, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 		if not os.path.exists(output_path.parent):
 			os.mkdir(output_path.parent)
+			os.chmod(output_path.parent, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 		output_df.to_csv(output_path,index=False)
+		os.chmod(output_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 
+	plt.close('all')
 	return 
 
 def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
@@ -1245,7 +1251,9 @@ def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
 	plt.tight_layout()
 	plt.subplots_adjust(hspace=0.6)
 
-	plt.savefig(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{date}_{target}_summary.png',dpi=300)
+	summary_plot_output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{date}_{target}_summary.png'
+	plt.savefig(summary_plot_output_path,dpi=300)
+	os.chmod(summary_plot_output_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 
 	if regression:
 		regr = linear_model.LinearRegression()
@@ -1306,19 +1314,76 @@ def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
 		plt.errorbar(bx, by, bye, marker='o', color='none', mec='k', ecolor='k', mew=2, ls='', zorder=3)
 
 
-	plt.figure()
-	airmass_corrs = np.zeros(len(targ_and_refs))
-	dists = np.sqrt((targ_and_refs['x'][1:]-targ_and_refs['x'][0])**2+(targ_and_refs['y'][1:]-targ_and_refs['y'][0])**2)
-	for i in range(len(targ_and_refs)):
-		if i == 0:
-			name = 'Target'
-		else:
-			name = f'Ref {i}'
-		corr,pval =  pearsonr(df['Airmass'][use_inds],df[name+' Relative Flux'][use_inds])
-		airmass_corrs[i] = corr
-	plt.scatter(targ_and_refs['bp_rp'],airmass_corrs)
+	# plt.figure()
+	# airmass_corrs = np.zeros(len(targ_and_refs))
+	# dists = np.sqrt((targ_and_refs['x'][1:]-targ_and_refs['x'][0])**2+(targ_and_refs['y'][1:]-targ_and_refs['y'][0])**2)
+	# for i in range(len(targ_and_refs)):
+	# 	if i == 0:
+	# 		name = 'Target'
+	# 	else:
+	# 		name = f'Ref {i}'
+	# 	corr,pval =  pearsonr(df['Airmass'][use_inds],df[name+' Relative Flux'][use_inds])
+	# 	airmass_corrs[i] = corr
+	# plt.scatter(targ_and_refs['bp_rp'],airmass_corrs)
+	plt.close('all')
+	return
 
-	
+def plot_ref_lightcurves(lc_path, bin_mins=15):
+	lc_path = Path(lc_path)
+	target = lc_path.parent.parent.name
+	output_path = lc_path.parent/'reference_lightcurves/'
+	if not os.path.exists(output_path):
+		os.mkdir(output_path)		
+		os.chmod(output_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+
+	#Clear out existing files
+	existing_files = glob(str(output_path/'*.png'))
+	for file in existing_files:
+		os.remove(file)
+
+	df = pd.read_csv(lc_path)
+	targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
+	n_refs = len(targ_and_refs)-1
+	times = np.array(df['BJD TDB'])
+
+	for i in range(n_refs):
+		print(f'Doing Ref {i+1} of {n_refs}')
+		rel_flux = np.array(df[f'Ref {i+1} Relative Flux'])
+		rel_flux_err = np.array(df[f'Ref {i+1} Relative Flux Error'])
+
+		#Sigma clip
+		v, l, h = sigmaclip(rel_flux)
+		use_inds = np.where((rel_flux>l)&(rel_flux<h))[0]
+		rel_flux = rel_flux[use_inds]
+		rel_flux_err = rel_flux_err[use_inds]
+
+		renorm = np.mean(rel_flux)
+		rel_flux /= renorm
+		rel_flux_err /= renorm
+
+		#print(f"bp_rp: {targ_and_refs['bp_rp'][i+1]}")
+		fig, ax = plt.subplots(1,1,figsize=(10,5),sharex=True)
+		
+		bx, by, bye = tierras_binner(times[use_inds],rel_flux,bin_mins=bin_mins)
+
+		fig.suptitle(f'Reference {i+1}',fontsize=16)
+
+		ax.plot(times[use_inds], rel_flux,  marker='.', ls='', color='#b0b0b0')
+		ax.errorbar(bx,by,bye,marker='o',color='none',ecolor='k',mec='k',mew=2,ms=5,ls='',label=f'{bin_mins}-min binned photometry',zorder=3)
+		#ax.set_ylim(0.975,1.025)
+		ax.tick_params(labelsize=14)
+		ax.set_xlabel('Time (BJD$_{TDB}$)',fontsize=16)
+		ax.set_ylabel('Normalized Flux',fontsize=16)
+		ax.grid(True, alpha=0.8)
+		ax.legend()
+		
+		plt.tight_layout()
+
+		plt.savefig(output_path/f'ref_{i+1}.png',dpi=300)
+		os.chmod(output_path/f'ref_{i+1}.png', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+
+		plt.close()
+	return
 
 def tierras_binner(t, y, bin_mins=15):
     x_offset = t[0]
@@ -1441,7 +1506,14 @@ def optimal_lc_chooser(date, target, ffname, plot=False):
 	if plot:
 		ax[-1].set_xlabel('Time (BJD$_{TDB}$)')
 		plt.tight_layout()
-		plt.savefig(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{target}_{date}_optimized_lc_.png',dpi=300)
+		optimized_lc_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{target}_{date}_optimized_lc_.png'
+		plt.savefig(optimized_lc_path,dpi=300)
+		os.chmod(optimized_lc_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+	
+	with open (f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt','w') as f:
+		f.write(best_lc_path)
+	os.chmod(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+	
 	return best_lc_path
 
 def ap_range(file_list, targ_and_refs, overwrite=False):
@@ -1522,18 +1594,29 @@ def ap_range(file_list, targ_and_refs, overwrite=False):
 		fwhm_x_75_pix = np.percentile(fwhm_x/PLATE_SCALE,75)
 		fwhm_y_75_pix = np.percentile(fwhm_y/PLATE_SCALE,75)
 		lower_pix_bound = int(np.floor(np.min([fwhm_x_75_pix,fwhm_y_75_pix])*1.5))-1 #Subtract one for some tolerance
-		upper_pix_bound = int(np.ceil(np.max([fwhm_x_75_pix,fwhm_y_75_pix])*2))+1 #Add one for some tolerance
+		if lower_pix_bound < 1:
+			lower_pix_bound = 1
+		upper_pix_bound = int(np.ceil(np.max([fwhm_x_75_pix,fwhm_y_75_pix])*3))+1 #Add one for some tolerance
+
+
 		aps_to_use = np.arange(lower_pix_bound, upper_pix_bound+1)
 
-		output_dict = {'Aperture radii':aps_to_use}
+		an_in = int(np.ceil(6*np.max([fwhm_x_75_pix,fwhm_y_75_pix])))
+		an_ins_to_use = np.zeros(len(aps_to_use),dtype=int) + an_in
+		an_outs_to_use = an_ins_to_use + 20
+
+		output_dict = {'Aperture radii':aps_to_use, 'Inner annulus radii':an_ins_to_use, 'Outer annulus radii':an_outs_to_use}
 		output_df = pd.DataFrame(output_dict)
 		output_df.to_csv(output_path,index=False)
+		os.chmod(output_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 	else:
 		print(f'Restoring aperture range output from {output_path}.')
 		output_df = pd.read_csv(output_path)
 		aps_to_use = np.array(output_df['Aperture radii'])
-	
-	return aps_to_use
+		an_ins_to_use = np.array(output_df['Inner annulus radii'])
+		an_outs_to_use = np.array(output_df['Outer annulus radii'])
+
+	return aps_to_use, an_ins_to_use[0], an_outs_to_use[0]
 
 def exclude_files(date, target, ffname,stdcrms_clip_threshold=6):
 	#TODO: This will not work on files for which you don't have rwx permissions...
@@ -1551,6 +1634,7 @@ def exclude_files(date, target, ffname,stdcrms_clip_threshold=6):
 	if len(bad_inds) > 0:
 		if not (file_list[0].parent/'excluded').exists():
 			os.mkdir(file_list[0].parent/'excluded')
+			os.chmod(file_list[0].parent/'excluded', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 		for i in range(len(bad_inds)):
 			file_to_move = file_list[bad_inds[i]]
 			print(f'Moving {file_to_move} to {file_to_move.parent}/excluded/')
@@ -1569,6 +1653,10 @@ if __name__ == '__main__':
 	ap.add_argument("-edge_limit",required=False,default=55,help="Minimum separation a source has from the detector edge to be considered as a reference star.",type=float)
 	ap.add_argument("-dimness_limit",required=False,default=0.05,help="Minimum flux a reference star can have compared to the target to be considered as a reference star.",type=float)
 	ap.add_argument("-targ_distance_limit",required=False,default=2000,help="Maximum distance a source can be from the target in pixels to be considered as a reference star.",type=float)
+	ap.add_argument("-overwrite_refs",required=False,default=False,help="Whether or not to overwrite previous reference star output.",type=bool)
+	ap.add_argument("-centroid",required=False,default=True,help="Whether or not to centroid during aperture photometry.",type=bool)
+	ap.add_argument("-live_plot",required=False,default=True,help="Whether or not to plot the photometry as it is performed.",type=bool)
+	ap.add_argument("-regress_flux",required=False,default=False,help="Whether or not to perform a regression of relative target flux against ancillary variables (airmass, x/y position, FWHM, etc.).",type=bool)
 
 	args = ap.parse_args()
 
@@ -1580,6 +1668,10 @@ if __name__ == '__main__':
 	edge_limit = args.edge_limit
 	dimness_limit = args.dimness_limit
 	targ_distance_limit = args.targ_distance_limit
+	overwrite_refs = args.overwrite_refs
+	centroid = args.centroid
+	live_plot = args.live_plot
+	regress_flux = args.regress_flux
 
 	#Define base paths
 	global fpath, lcpath
@@ -1588,10 +1680,13 @@ if __name__ == '__main__':
 
 	if not os.path.exists(lcpath+f'/{date}'):
 		os.mkdir(lcpath+f'/{date}')
+		os.chmod(lcpath+f'/{date}', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 	if not os.path.exists(lcpath+f'/{date}/{target}'):
 		os.mkdir(lcpath+f'/{date}/{target}')
+		os.chmod(lcpath+f'/{date}/{target}', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 	if not os.path.exists(lcpath+f'/{date}/{target}/{ffname}'):
 		os.mkdir(lcpath+f'/{date}/{target}/{ffname}')
+		os.chmod(lcpath+f'/{date}/{target}/{ffname}', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 
 	#Remove any bad images from the analysis
 	#exclude_files(date, target, ffname)
@@ -1600,21 +1695,21 @@ if __name__ == '__main__':
 	flattened_files = get_flattened_files(date, target, ffname)
 
 	#Select target and reference stars
-	targ_and_refs = reference_star_chooser(flattened_files, mode='manual', plot=True, nearness_limit=nearness_limit, edge_limit=edge_limit,dimness_limit=dimness_limit, targ_distance_limit=targ_distance_limit, overwrite=False)
+	targ_and_refs = reference_star_chooser(flattened_files, mode='manual', plot=True, nearness_limit=nearness_limit, edge_limit=edge_limit,dimness_limit=dimness_limit, targ_distance_limit=targ_distance_limit, overwrite=overwrite_refs)
 
 	#Determine which aperture sizes to use for photometry
-	ap_radii = ap_range(flattened_files, targ_and_refs)
-	#ap_radii = [14,15,16,17,18,19,20,21,22]
+	ap_radii, an_in, an_out = ap_range(flattened_files, targ_and_refs)
 
 	#Do photometry
-	fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=30, an_out=40, centroid=True, live_plot=True)
+	fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=an_in, an_out=an_out, centroid=centroid, live_plot=live_plot)
 
 	#Determine the optimal aperture size
 	optimal_lc_path = optimal_lc_chooser(date,target,ffname,plot=True)
 	print(f'Optimal light curve: {optimal_lc_path}')
 	
 	#Use the optimal aperture to plot the target light curve
-	plot_target_lightcurve(optimal_lc_path, regression=False)
+	plot_target_lightcurve(optimal_lc_path, regression=regress_flux)
 	
-	breakpoint()
+	plot_ref_lightcurves(optimal_lc_path)
+
 	
