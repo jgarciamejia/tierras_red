@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import numpy as np 
 import pandas as pd
 from matplotlib.cm import get_cmap
@@ -29,6 +31,7 @@ from scipy.signal import correlate2d, fftconvolve, savgol_filter
 from copy import deepcopy
 import argparse
 import os 
+import stat
 import sys
 import lfa
 import time
@@ -148,13 +151,16 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 		print('No saved target/reference star positions found!\n')
 		if not reference_file_path.parent.exists():
 			os.mkdir(reference_file_path.parent)
+			os.chmod(reference_file_path.parent, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 		
 		stacked_image_path = reference_file_path.parent/(target+'_stacked_image.fits')
 		if not stacked_image_path.exists():
 			print('No stacked field image found!')
 			stacked_hdu = align_and_stack_images(file_list)
-			stacked_hdu.writeto(Path('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits'), overwrite=True)
-			print(f"Saved stacked field to {'/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits'}")
+			stacked_image_path = Path('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')
+			stacked_hdu.writeto(stacked_image_path, overwrite=True)
+			os.chmod(stacked_image_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+			print(f"Saved stacked field to {stacked_image_path}")
 		else:
 			print(f'Restoring stacked field image from {stacked_image_path}.')
 		
@@ -195,7 +201,7 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 		df = pd.DataFrame(objs_stack)
 		output_path = reference_file_path.parent/(target+'_stacked_source_detections.csv')
 		df.to_csv(output_path, index=False)
-
+		os.chmod(output_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
 
 		#Figure out where the target is 
 		catra = stacked_image_header['CAT-RA']
@@ -331,13 +337,16 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 			result = Gaia.cone_search_async(coordinate=coord, radius=u.Quantity(1.0, u.arcsec)).get_results()
 			if len(result) == 0:
 				print('No object found, expanding search radius...')
-				result = Gaia.cone_search_async(coordinate=coord, radius=u.Quantity(3.0, u.arcsec)).get_results()
+				result = Gaia.cone_search_async(coordinate=coord, radius=u.Quantity(5.0, u.arcsec)).get_results()
 			if len(result) > 1:
 				print('More than one object found...')
 				breakpoint()
 			else:
 				ind = 0 
-			gaia_ids.append(result[ind]['source_id'])
+			try:
+				gaia_ids.append(result[ind]['source_id'])
+			except:
+				breakpoint()
 			parallaxes[i] = result[ind]['parallax']
 			pmras[i] = result[ind]['pmra']
 			pmdecs[i] = result[ind]['pmdec']
@@ -358,6 +367,8 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 
 		output_df = pd.DataFrame(output_dict)
 		output_df.to_csv(reference_file_path, index=False)
+		os.chmod(reference_file_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		output_df = pd.read_csv(reference_file_path) #Read it back in to get the type casting right for later steps
 	else:
 		print(f'Restoring target/reference star positions from {reference_file_path}')
 		output_df = pd.read_csv(reference_file_path)
@@ -1553,13 +1564,22 @@ if __name__ == '__main__':
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-date", required=True, help="Date of observation in YYYYMMDD format.")
 	ap.add_argument("-target", required=True, help="Name of observed target exactly as shown in raw FITS files.")
-	ap.add_argument("-ffname", required=True, help="Name of folder in which to store reduced+flattened data. Convention is flatXXXX. XXXX=0000 means no flat     was used.")
+	ap.add_argument("-ffname", required=True, help="Name of folder in which to store reduced+flattened data. Convention is flatXXXX. XXXX=0000 means no flat was used.")
+	ap.add_argument("-nearness_limit",required=False,default=15,help="Minimum separation a source has to have from all other sources to be considered as a reference star.",type=float)
+	ap.add_argument("-edge_limit",required=False,default=55,help="Minimum separation a source has from the detector edge to be considered as a reference star.",type=float)
+	ap.add_argument("-dimness_limit",required=False,default=0.05,help="Minimum flux a reference star can have compared to the target to be considered as a reference star.",type=float)
+	ap.add_argument("-targ_distance_limit",required=False,default=2000,help="Maximum distance a source can be from the target in pixels to be considered as a reference star.",type=float)
+
 	args = ap.parse_args()
 
 	#Access observation info
 	date = args.date
 	target = args.target
 	ffname = args.ffname
+	nearness_limit = args.nearness_limit
+	edge_limit = args.edge_limit
+	dimness_limit = args.dimness_limit
+	targ_distance_limit = args.targ_distance_limit
 
 	#Define base paths
 	global fpath, lcpath
@@ -1580,7 +1600,7 @@ if __name__ == '__main__':
 	flattened_files = get_flattened_files(date, target, ffname)
 
 	#Select target and reference stars
-	targ_and_refs = reference_star_chooser(flattened_files, mode='manual', plot=True, nearness_limit=30, edge_limit=55,dimness_limit=0.25, targ_distance_limit=1000, overwrite=False)
+	targ_and_refs = reference_star_chooser(flattened_files, mode='manual', plot=True, nearness_limit=nearness_limit, edge_limit=edge_limit,dimness_limit=dimness_limit, targ_distance_limit=targ_distance_limit, overwrite=False)
 
 	#Determine which aperture sizes to use for photometry
 	ap_radii = ap_range(flattened_files, targ_and_refs)
