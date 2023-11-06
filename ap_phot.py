@@ -678,14 +678,17 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 			rod_temps[i] = source_header['RODTEMP']
 			cab_temps[i] = source_header['CABTEMP']
 			inst_temps[i] = source_header['INSTTEMP']
+			ret_temps[i] = source_header['RETTEMP']
+			pri_temps[i] = source_header['PRITEMP']
+
 		except:
 			sec_temps[i] = np.nan
 			rod_temps[i] = np.nan
 			cab_temps[i] = np.nan
 			inst_temps[i] = np.nan
+			ret_temps[i] = np.nan
+			pri_temps[i] = np.nan
 
-		ret_temps[i] = source_header['RETTEMP']
-		pri_temps[i] = source_header['PRITEMP']
 		temps[i] = source_header['TEMPERAT']
 		humidities[i] = source_header['HUMIDITY']
 		dewpoints[i] = source_header['DEWPOINT']
