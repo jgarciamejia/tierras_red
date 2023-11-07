@@ -45,6 +45,7 @@ import copy
 import batman
 from glob import glob
 import pickle
+import shutil
 
 def get_flattened_files(date, target, ffname):
 	#Get a list of data files sorted by exposure number
@@ -151,7 +152,7 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 		print('No saved target/reference star positions found!\n')
 		if not reference_file_path.parent.exists():
 			os.mkdir(reference_file_path.parent)
-			os.chmod(reference_file_path.parent, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+			set_tierras_permission(reference_file_path.parent)
 		
 		stacked_image_path = reference_file_path.parent/(target+'_stacked_image.fits')
 		if not stacked_image_path.exists():
@@ -159,7 +160,7 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 			stacked_hdu = align_and_stack_images(file_list)
 			stacked_image_path = Path('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')
 			stacked_hdu.writeto(stacked_image_path, overwrite=True)
-			os.chmod(stacked_image_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+			set_tierras_permissions(stacked_image_path)
 			print(f"Saved stacked field to {stacked_image_path}")
 		else:
 			print(f'Restoring stacked field image from {stacked_image_path}.')
@@ -201,7 +202,7 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 		df = pd.DataFrame(objs_stack)
 		output_path = reference_file_path.parent/(target+'_stacked_source_detections.csv')
 		df.to_csv(output_path, index=False)
-		os.chmod(output_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		set_tierras_permissions(output_path)
 
 		#Figure out where the target is 
 		catra = stacked_image_header['CAT-RA']
@@ -306,7 +307,7 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 
 				reference_field_path = reference_file_path.parent/(f'{target}_target_and_refs.png')
 				plt.savefig(reference_field_path,dpi=300)
-				os.chmod(reference_field_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+				set_tierras_permissions(reference_field_path)
 				plt.close()
 		
 		#df = pd.DataFrame(targ_and_refs)
@@ -369,7 +370,7 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 
 		output_df = pd.DataFrame(output_dict)
 		output_df.to_csv(reference_file_path, index=False)
-		os.chmod(reference_file_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		set_tierras_permissions(reference_file_path)
 		output_df = pd.read_csv(reference_file_path) #Read it back in to get the type casting right for later steps
 	else:
 		print(f'Restoring target/reference star positions from {reference_file_path}')
@@ -680,7 +681,6 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 			inst_temps[i] = source_header['INSTTEMP']
 			ret_temps[i] = source_header['RETTEMP']
 			pri_temps[i] = source_header['PRITEMP']
-
 		except:
 			sec_temps[i] = np.nan
 			rod_temps[i] = np.nan
@@ -1097,12 +1097,12 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 		output_df = pd.DataFrame(np.transpose(output_list),columns=output_header)
 		if not os.path.exists(output_path.parent.parent):
 			os.mkdir(output_path.parent.parent)
-			os.chmod(output_path.parent.parent, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+			set_tierras_permissions(output_path.parent.parent)
 		if not os.path.exists(output_path.parent):
 			os.mkdir(output_path.parent)
-			os.chmod(output_path.parent, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+			set_tierras_permissions(output_path.parent)
 		output_df.to_csv(output_path,index=False)
-		os.chmod(output_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		set_tierras_permissions(output_path)
 
 	plt.close('all')
 	return 
@@ -1256,7 +1256,7 @@ def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
 
 	summary_plot_output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{date}_{target}_summary.png'
 	plt.savefig(summary_plot_output_path,dpi=300)
-	os.chmod(summary_plot_output_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+	set_tierras_permissions(summary_plot_output_path)
 
 	if regression:
 		regr = linear_model.LinearRegression()
@@ -1337,7 +1337,7 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 	output_path = lc_path.parent/'reference_lightcurves/'
 	if not os.path.exists(output_path):
 		os.mkdir(output_path)		
-		os.chmod(output_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		set_tierras_permissions(output_path)
 
 	#Clear out existing files
 	existing_files = glob(str(output_path/'*.png'))
@@ -1383,7 +1383,7 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 		plt.tight_layout()
 
 		plt.savefig(output_path/f'ref_{i+1}.png',dpi=300)
-		os.chmod(output_path/f'ref_{i+1}.png', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		set_tierras_permissions(output_path/f'ref_{i+1}.png')
 
 		plt.close()
 	return
@@ -1409,6 +1409,24 @@ def tierras_binner(t, y, bin_mins=15):
         bye[i] = np.std(y[bin_inds])/np.sqrt(len(bin_inds))
     
     return bx, by, bye 
+
+def tierras_binner_inds(t, bin_mins=15):
+    x_offset = t[0]
+    t = t - x_offset
+    t = t*24*60
+    n_bins = int(np.ceil(t[-1]/bin_mins))
+    bin_inds = []
+    for i in range(n_bins):
+        if i == n_bins-1:
+            time_start = i*bin_mins
+            time_end = t[-1]+1
+        else:
+            time_start = i*bin_mins
+            time_end = (i+1)*bin_mins
+        bin_inds.append(np.where((t>=time_start)&(t<time_end))[0])
+      
+    
+    return bin_inds
 
 def plot_ref_positions(file_list, targ_and_refs):
 	im = fits.open(file_list[5])[0].data
@@ -1468,13 +1486,14 @@ def transit_model(times, T0,P,Rp,a,inc,ecc,w,u1,u2):
 def moving_average(x, w):
     return np.convolve(x, np.ones(w), 'same') / w
 
-def optimal_lc_chooser(date, target, ffname, plot=False):
+def optimal_lc_chooser(date, target, ffname, start_time=0, stop_time=0, plot=False):
 	lc_list = np.array(glob(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/*phot*.csv'))
 	sort_inds = np.argsort([float(i.split('/')[-1].split('_')[-1].split('.')[0]) for i in lc_list])
 	lc_list = lc_list[sort_inds]
 
 	if plot:
 		fig, ax = plt.subplots(len(lc_list),1,figsize=(10,1.25*len(lc_list)),sharex=True,sharey=True)
+	
 
 	best_stddev = 9999.
 	for i in range(len(lc_list)):
@@ -1491,6 +1510,25 @@ def optimal_lc_chooser(date, target, ffname, plot=False):
 		norm = np.mean(rel_targ_flux)
 		rel_targ_flux /= norm 
 		rel_targ_flux_err /= norm
+		
+		#Allow user to specify start/stop times over which to evaluate light curve (i.e., to ignore transits)
+		if (start_time != 0) and (stop_time != 0):
+			eval_inds = np.where((times>=start_time)&(times<=stop_time))[0]
+		else:
+			eval_inds = np.arange(len(times))
+		
+		times_eval = times[eval_inds]
+		flux_eval = rel_targ_flux[eval_inds]
+		
+		#Option 1: Evaluate the median standard deviation over 5-minute intervals 
+		bin_inds = tierras_binner_inds(times_eval, bin_mins=5)
+		stddevs = np.zeros(len(bin_inds))
+		for j in range(len(bin_inds)):
+			stddevs[j] = np.std(flux_eval[bin_inds[j]])
+		med_stddev = np.median(stddevs)
+
+		# #Option 2: just evaluate stddev
+		# med_stddev = np.std(flux_eval)
 
 		#moving_avg = moving_average(rel_targ_flux,int(len(times)/50))
 		if plot:
@@ -1499,23 +1537,24 @@ def optimal_lc_chooser(date, target, ffname, plot=False):
 			ax2 = ax[i].twinx()
 			ax2.set_ylabel(lc_list[i].split('_')[-1].split('.csv')[0],rotation=270,labelpad=12)
 			ax2.set_yticks([])
-		stddev = np.std(rel_targ_flux)
-		print(np.std(rel_targ_flux)*1e6)
-		if stddev < best_stddev:
+		#stddev = np.std(rel_targ_flux)
+		print(f'Median 5-min stddev: {med_stddev*1e6:.1f} ppm')
+		if med_stddev < best_stddev:
 			best_ind = i
 			best_lc_path = lc_list[i]
-			best_stddev = stddev
+			best_stddev = med_stddev
+	breakpoint()
 	
 	if plot:
 		ax[-1].set_xlabel('Time (BJD$_{TDB}$)')
 		plt.tight_layout()
 		optimized_lc_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{target}_{date}_optimized_lc_.png'
 		plt.savefig(optimized_lc_path,dpi=300)
-		os.chmod(optimized_lc_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		set_tierras_permissions(optimized_lc_path)
 	
 	with open (f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt','w') as f:
 		f.write(best_lc_path)
-	os.chmod(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+	set_tierras_permissions(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt')
 	
 	return best_lc_path
 
@@ -1611,7 +1650,7 @@ def ap_range(file_list, targ_and_refs, overwrite=False):
 		output_dict = {'Aperture radii':aps_to_use, 'Inner annulus radii':an_ins_to_use, 'Outer annulus radii':an_outs_to_use}
 		output_df = pd.DataFrame(output_dict)
 		output_df.to_csv(output_path,index=False)
-		os.chmod(output_path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		set_tierras_permissions(output_path)
 	else:
 		print(f'Restoring aperture range output from {output_path}.')
 		output_df = pd.read_csv(output_path)
@@ -1637,7 +1676,7 @@ def exclude_files(date, target, ffname,stdcrms_clip_threshold=6):
 	if len(bad_inds) > 0:
 		if not (file_list[0].parent/'excluded').exists():
 			os.mkdir(file_list[0].parent/'excluded')
-			os.chmod(file_list[0].parent/'excluded', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+			set_tierras_permissions(file_list[0].parent/'excluded')
 		for i in range(len(bad_inds)):
 			file_to_move = file_list[bad_inds[i]]
 			print(f'Moving {file_to_move} to {file_to_move.parent}/excluded/')
@@ -1646,6 +1685,10 @@ def exclude_files(date, target, ffname,stdcrms_clip_threshold=6):
 
 	return
 
+def set_tierras_permissions(path):
+	os.chmod(path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+	shutil.chown(path, user=None, group='exoplanet')
+	return 
 
 if __name__ == '__main__':
 	ap = argparse.ArgumentParser()
@@ -1683,13 +1726,13 @@ if __name__ == '__main__':
 
 	if not os.path.exists(lcpath+f'/{date}'):
 		os.mkdir(lcpath+f'/{date}')
-		os.chmod(lcpath+f'/{date}', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		set_tierras_permissions(lcpath+f'/{date}')
 	if not os.path.exists(lcpath+f'/{date}/{target}'):
 		os.mkdir(lcpath+f'/{date}/{target}')
-		os.chmod(lcpath+f'/{date}/{target}', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		set_tierras_permissions(lcpath+f'/{date}/{target}')
 	if not os.path.exists(lcpath+f'/{date}/{target}/{ffname}'):
 		os.mkdir(lcpath+f'/{date}/{target}/{ffname}')
-		os.chmod(lcpath+f'/{date}/{target}/{ffname}', stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		set_tierras_permissions(lcpath+f'/{date}/{target}/{ffname}')
 
 	#Remove any bad images from the analysis
 	#exclude_files(date, target, ffname)
@@ -1707,7 +1750,7 @@ if __name__ == '__main__':
 	fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=an_in, an_out=an_out, centroid=centroid, live_plot=live_plot)
 
 	#Determine the optimal aperture size
-	optimal_lc_path = optimal_lc_chooser(date,target,ffname,plot=True)
+	optimal_lc_path = optimal_lc_chooser(date,target,ffname,plot=True,start_time=2460253.8,stop_time=2460254.0145834)
 	print(f'Optimal light curve: {optimal_lc_path}')
 	
 	#Use the optimal aperture to plot the target light curve
