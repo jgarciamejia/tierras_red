@@ -153,7 +153,7 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 		print('No saved target/reference star positions found!\n')
 		if not reference_file_path.parent.exists():
 			os.mkdir(reference_file_path.parent)
-			set_tierras_permission(reference_file_path.parent)
+			set_tierras_permissions(reference_file_path.parent)
 		
 		stacked_image_path = reference_file_path.parent/(target+'_stacked_image.fits')
 		if not stacked_image_path.exists():
