@@ -145,7 +145,8 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 			fig, ax (matplotlib objects): the figure/axis objects associated with the plot
 
 	'''
-	
+	target = file_list[0].parent.parent.name
+
 	#Start by checking for existing csv file about target/reference positions
 	reference_file_path = Path('/data/tierras/targets/'+target+'/'+target+'_target_and_ref_stars.csv')
 	if (reference_file_path.exists() == False) or (overwrite==True):
@@ -543,7 +544,11 @@ def jd_utc_to_bjd_tdb(jd_utc, ra, dec, location='Whipple'):
     return (input_jd_utc.tdb + ltt_bary).value
 
 def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, an_out=60, centroid=False, live_plot=False):
-	#file_list = file_list[2135:] #TESTING!!!
+	ffname = file_list[0].parent.name	
+	target = file_list[0].parent.parent.name
+	date = file_list[0].parent.parent.parent.name 
+
+	#file_list = file_list[182:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
@@ -751,6 +756,7 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 				centroid_mask[cutout.shape[0]-int(an_out/2):,:] = True
 				centroid_mask[:,cutout.shape[1]-int(an_out/2):] = True
 				x_pos_cutout_centroid, y_pos_cutout_centroid = centroid_1dg(cutout-np.median(cutout),mask=centroid_mask)
+				
 
 				#Make sure the measured centroid is actually in the cutout
 				if (x_pos_cutout_centroid > 0) and (x_pos_cutout_centroid < cutout.shape[1]) and (y_pos_cutout_centroid > 0) and (y_pos_cutout_centroid < cutout.shape[0]):
@@ -848,11 +854,40 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 					non_linear_flags[k,j,i] = 1
 
 				#Estimate background 
-				annulus_mask = an.to_mask(method='center')
-				try:
-					an_data = annulus_mask * cutout
-				except:
-					breakpoint()
+
+				#Determine which pixels are in the annulus using their distances from (x_pos_cutout,y_pos_cutout)
+				dists = np.sqrt((x_pos_cutout-xx)**2+(y_pos_cutout-yy)**2)
+				an_inds = np.where((dists<an_out)&(dists>an_in))  
+				an_data = cutout[an_inds]
+
+				#annulus_mask = an.to_mask(method='center').data
+				#try:
+				#	an_data = annulus_mask * cutout
+				#except:
+				#	#If the annulus extends off the edge, this will fail. 
+				#	#Need to cut down the annulus mask to match the shape of the cutout. 
+				#	#TODO: test on sources on left, top, and right edges. 
+				#	y_diff = annulus_mask.shape[0]-cutout.shape[0]
+				#	x_diff = annulus_mask.shape[1]-cutout.shape[1]
+				#	
+				#	if y_pos_cutout + an_out > cutout.shape[0]:
+				#		annulus_mask = annulus_mask[0:cutout.shape[0],:]
+				#	if y_pos_cutout - an_out < 0:
+				#		annulus_mask = annulus_mask[y_diff:,:]
+				#	if x_pos_cutout + an_out > cutout.shape[1]:
+				#		annulus_mask = annulus_mask[:,0:cutout.shape[1]]
+				#	if x_pos_cutout - an_out < 0:
+				#		annulus_mask = annulus_mask[:,x_diff:]
+				#	#if y_pos_image < an_out: 
+				#	#	annulus_mask = annulus_mask[y_diff:,:]
+				#	#if y_pos_image > source_data.shape[0]-an_out:
+				#	#	annulus_mask = annulus_mask[0:cutout.shape[0],:]
+				#	#if x_pos_image < an_out:
+				#	#	annulus_mask = annulus_mask[:,x_diff:]
+				#	#if x_pos_image > source_data.shape[1]-an_out:
+				#	#	annulus_mask = annulus_mask[:,0:cutout.shape[1]]
+				#	breakpoint()
+				#	an_data = annulus_mask * cutout 
 
 				#NEW
 				v, l, h = sigmaclip(an_data[an_data!=0],2,2)
@@ -1108,6 +1143,10 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 	return 
 
 def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
+	date = file_path.parent.parent.parent.name
+	target = file_path.parent.parent.name
+	ffname = file_path.parent.name 
+
 	df = pd.read_csv(file_path)
 	times = np.array(df['BJD TDB'])
 	x_offset =  int(np.floor(times[0]))
@@ -1500,7 +1539,15 @@ def optimal_lc_chooser(date, target, ffname, start_time=0, stop_time=0, plot=Fal
 		df = pd.read_csv(lc_list[i])
 		times = np.array(df['BJD TDB'])
 		rel_targ_flux = np.array(df['Target Relative Flux'])
-		rel_targ_flux_err = np.array(df['Target Relative Flux Error'])
+		rel_targ_flux_err = np.array(df['Target Relative Flux Error'])\
+		
+		#Trim any NaNs
+		use_inds = ~np.isnan(rel_targ_flux)
+		times = times[use_inds]
+		rel_targ_flux = rel_targ_flux[use_inds]
+		rel_targ_flux_err = rel_targ_flux_err[use_inds] 
+		
+		#Sigmaclip
 		v,l,h = sigmaclip(rel_targ_flux)
 		use_inds = np.where((rel_targ_flux>l)&(rel_targ_flux<h))[0]
 		times = times[use_inds]
@@ -1517,6 +1564,7 @@ def optimal_lc_chooser(date, target, ffname, start_time=0, stop_time=0, plot=Fal
 		else:
 			eval_inds = np.arange(len(times))
 		
+
 		times_eval = times[eval_inds]
 		flux_eval = rel_targ_flux[eval_inds]
 		
@@ -1524,8 +1572,8 @@ def optimal_lc_chooser(date, target, ffname, start_time=0, stop_time=0, plot=Fal
 		bin_inds = tierras_binner_inds(times_eval, bin_mins=5)
 		stddevs = np.zeros(len(bin_inds))
 		for j in range(len(bin_inds)):
-			stddevs[j] = np.std(flux_eval[bin_inds[j]])
-		med_stddev = np.median(stddevs)
+			stddevs[j] = np.nanstd(flux_eval[bin_inds[j]])
+		med_stddev = np.nanmedian(stddevs)
 
 		# #Option 2: just evaluate stddev
 		# med_stddev = np.std(flux_eval)
@@ -1543,7 +1591,6 @@ def optimal_lc_chooser(date, target, ffname, start_time=0, stop_time=0, plot=Fal
 			best_ind = i
 			best_lc_path = lc_list[i]
 			best_stddev = med_stddev
-	breakpoint()
 	
 	if plot:
 		ax[-1].set_xlabel('Time (BJD$_{TDB}$)')
@@ -1556,11 +1603,15 @@ def optimal_lc_chooser(date, target, ffname, start_time=0, stop_time=0, plot=Fal
 		f.write(best_lc_path)
 	set_tierras_permissions(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt')
 	
-	return best_lc_path
+	return Path(best_lc_path)
 
 def ap_range(file_list, targ_and_refs, overwrite=False):
 	'''Measures the average FWHM of the target across a set of images to determine a range of apertures for performing photometry.
 	'''
+	ffname = file_list[0].parent.name
+	target = file_list[0].parent.parent.name
+	date = file_list[0].parent.parent.parent.name
+
 
 	output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/aperture_range.csv'
 
@@ -1690,7 +1741,7 @@ def set_tierras_permissions(path):
 	shutil.chown(path, user=None, group='exoplanet')
 	return 
 
-if __name__ == '__main__':
+def main(raw_args=None):
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-date", required=True, help="Date of observation in YYYYMMDD format.")
 	ap.add_argument("-target", required=True, help="Name of observed target exactly as shown in raw FITS files.")
@@ -1704,7 +1755,7 @@ if __name__ == '__main__':
 	ap.add_argument("-live_plot",required=False,default=True,help="Whether or not to plot the photometry as it is performed.",type=bool)
 	ap.add_argument("-regress_flux",required=False,default=False,help="Whether or not to perform a regression of relative target flux against ancillary variables (airmass, x/y position, FWHM, etc.).",type=bool)
 
-	args = ap.parse_args()
+	args = ap.parse_args(raw_args)
 
 	#Access observation info
 	date = args.date
@@ -1718,7 +1769,7 @@ if __name__ == '__main__':
 	centroid = args.centroid
 	live_plot = args.live_plot
 	regress_flux = args.regress_flux
-
+	
 	#Define base paths
 	global fpath, lcpath
 	fpath = '/data/tierras/flattened'
@@ -1750,7 +1801,7 @@ if __name__ == '__main__':
 	fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=an_in, an_out=an_out, centroid=centroid, live_plot=live_plot)
 
 	#Determine the optimal aperture size
-	optimal_lc_path = optimal_lc_chooser(date,target,ffname,plot=True,start_time=2460253.8,stop_time=2460254.0145834)
+	optimal_lc_path = optimal_lc_chooser(date,target,ffname,plot=True,start_time=0,stop_time=0)
 	print(f'Optimal light curve: {optimal_lc_path}')
 	
 	#Use the optimal aperture to plot the target light curve
@@ -1758,4 +1809,6 @@ if __name__ == '__main__':
 	
 	plot_ref_lightcurves(optimal_lc_path)
 
+if __name__ == '__main__':
+	main()
 	
