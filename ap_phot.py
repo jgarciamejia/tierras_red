@@ -274,9 +274,9 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 				break
 		#Identify that image in the list of flattened files.
 		#NOTE this will only work if you're using the data from the same night as the stacked image
-		for i in range(len(flattened_files)):
-			if reference_filename in flattened_files[i].name:
-				reference_filepath = flattened_files[i]
+		for i in range(len(file_list)):
+			if reference_filename in file_list[i].name:
+				reference_filepath = file_list[i]
 				break
 
 		if plot or mode=='manual':
@@ -298,7 +298,7 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 					
 					plt.close()
 					
-					fig, ax = plot_image(fits.open(flattened_files[0])[0].data)
+					fig, ax = plot_image(fits.open(file_list[0])[0].data)
 					#ax.plot(objs_stack['x'],objs_stack['y'],'kx')
 					ax.plot(targ_and_refs['x'][0], targ_and_refs['y'][0],'bx')
 					ax.plot(targ_and_refs['x'][1:], targ_and_refs['y'][1:],'rx')
