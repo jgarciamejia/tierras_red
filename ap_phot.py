@@ -9,7 +9,7 @@ from matplotlib import gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from astropy.visualization import ImageNormalize, ZScaleInterval, simple_norm
 from astropy.convolution import Gaussian2DKernel
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, get_moon
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.stats import SigmaClip, sigma_clipped_stats
@@ -272,14 +272,16 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 			if 'Reference image' in stack_comments[i]:
 				reference_filename = stack_comments[i].split(': ')[1]
 				break
+		
 		#Identify that image in the list of flattened files.
 		#NOTE this will only work if you're using the data from the same night as the stacked image
 		for i in range(len(file_list)):
 			if reference_filename in file_list[i].name:
 				reference_filepath = file_list[i]
 				break
-
+		
 		if plot or mode=='manual':
+			
 			fig, ax = plot_image(fits.open(reference_filepath)[0].data)
 			#ax.plot(objs_stack['x'],objs_stack['y'],'kx')
 			ax.plot(targ_and_refs['x'][0], targ_and_refs['y'][0],'bx')
@@ -343,8 +345,8 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 				print('No object found, expanding search radius...')
 				result = Gaia.cone_search_async(coordinate=coord, radius=u.Quantity(5.0, u.arcsec)).get_results()
 			if len(result) > 1:
-				print('More than one object found...')
-				breakpoint()
+				#Choose whichever Gaia source is closest to the Tierras position?
+				ind = np.argmin(np.sqrt((result['ra']-ras_deg[i])**2+(result['dec']-decs_deg[i])**2))
 			else:
 				ind = 0 
 			try:
@@ -548,7 +550,7 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
 
-	#file_list = file_list[182:] #TESTING!!!
+	#file_list = file_list[100:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
@@ -581,6 +583,7 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 	humidities = np.zeros(len(file_list),dtype='float16')
 	dewpoints = np.zeros(len(file_list),dtype='float16')
 	sky_temps = np.zeros(len(file_list),dtype='float16')
+	lunar_distance = np.zeros(len(file_list),dtype='float16')
 	
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH SOURCE IN EACH FILE
 	source_x = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
@@ -590,7 +593,6 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 	source_x_fwhm_arcsec = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
 	source_y_fwhm_arcsec = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
 	source_theta_radians = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
-
 
 	#ARRAYS THAT CONTAIN DATA PERTAININING TO EACH APERTURE RADIUS FOR EACH SOURCE FOR EACH FILE
 	source_minus_sky_ADU = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
@@ -699,6 +701,7 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 		dewpoints[i] = source_header['DEWPOINT']
 		sky_temps[i] = source_header['SKYTEMP']
 
+		lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i])
 
 		#UPDATE SOURCE POSITIONS
 		#METHOD 1: WCS
@@ -934,8 +937,16 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 				source_sky_e[j,i] = bkg*GAIN
 				source_minus_sky_ADU[k,j,i] = phot_table['aperture_sum'][0]-bkg*ap.area 
 				source_minus_sky_e[k,j,i] = source_minus_sky_ADU[k,j,i]*GAIN
-				source_minus_sky_err_e[k,j,i] = np.sqrt(phot_table['aperture_sum'][0]*GAIN + bkg*ap.area*GAIN + DARK_CURRENT*source_header['EXPTIME']*ap.area + ap.area*READ_NOISE**2)
+
+				#Calculate uncertainty
+
+				#scintillation_rel = 1.5*0.09*(130)**(-2/3)*airmasses[i]**(7/4)*(2*EXPTIME)**(-1/2)*np.exp(-2306/8000)*np.sqrt(1+1/(len(targ_and_refs)-1)) #Follows equation 2 from Tierras SPIE paper
+				scintillation_rel = 0.09*(130)**(-2/3)*airmasses[i]**(7/4)*(2*EXPTIME)**(-1/2)*np.exp(-2306/8000)
+				scintillation_abs_e = scintillation_rel * source_minus_sky_e[k,j,i] #Don't know if this should be multiplied by the average source flux or the flux in this frame
+				source_minus_sky_err_e[k,j,i] = np.sqrt(phot_table['aperture_sum'][0]*GAIN + bkg*ap.area*GAIN + DARK_CURRENT*source_header['EXPTIME']*ap.area + ap.area*READ_NOISE**2 + scintillation_abs_e**2)
 				source_minus_sky_err_ADU[k,j,i] = source_minus_sky_err_e[k,j,i]/GAIN
+
+				
 
 				#Measure shape by fitting a 2D Gaussian to the cutout.
 				#Don't do for every aperture size, just do it once. 
@@ -1009,6 +1020,8 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 			ax[1,1].set_xlabel(f'Time - {int(bjd_tdb[0]):d}'+' (BJD$_{TDB}$)')
 			#plt.tight_layout()
 			plt.suptitle(f'{i+1} of {n_files}')
+			#plt.savefig(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/live_plots/{str(i+1).zfill(4)}.jpg',dpi=100)
+			#breakpoint()
 			plt.pause(0.01)
 			ax[0,0].cla()
 			ax[1,0].cla()
@@ -1071,6 +1084,8 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 		output_header.append('Dewpoint')
 		output_list.append([f'{val:.1f}' for val in sky_temps])
 		output_header.append('Sky Temperature')
+		output_list.append([f'{val:.5f}' for val in lunar_distance])
+		output_header.append('Lunar Distance')
 
 		for j in range(len(targ_and_refs)):
 			if j == 0:
@@ -1371,6 +1386,7 @@ def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
 	return
 
 def plot_ref_lightcurves(lc_path, bin_mins=15):
+	plt.ioff()
 	lc_path = Path(lc_path)
 	target = lc_path.parent.parent.name
 	output_path = lc_path.parent/'reference_lightcurves/'
@@ -1425,6 +1441,7 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 		set_tierras_permissions(output_path/f'ref_{i+1}.png')
 
 		plt.close()
+	plt.ion()
 	return
 
 def tierras_binner(t, y, bin_mins=15):
@@ -1539,7 +1556,7 @@ def optimal_lc_chooser(date, target, ffname, start_time=0, stop_time=0, plot=Fal
 		df = pd.read_csv(lc_list[i])
 		times = np.array(df['BJD TDB'])
 		rel_targ_flux = np.array(df['Target Relative Flux'])
-		rel_targ_flux_err = np.array(df['Target Relative Flux Error'])\
+		rel_targ_flux_err = np.array(df['Target Relative Flux Error'])
 		
 		#Trim any NaNs
 		use_inds = ~np.isnan(rel_targ_flux)
@@ -1741,6 +1758,21 @@ def set_tierras_permissions(path):
 	shutil.chown(path, user=None, group='exoplanet')
 	return 
 
+def get_lunar_distance(ra, dec, time):
+	astropy_time = Time(time, format='jd', scale='tdb')
+	field_coord = SkyCoord(ra,dec, unit=(u.hourangle, u.deg))
+	moon_coord = get_moon(astropy_time, location=coord.EarthLocation.of_site('Whipple'))
+	return field_coord.separation(moon_coord).value
+
+def t_or_f(arg):
+	ua = str(arg).upper()
+	if 'TRUE'.startswith(ua):
+		return True
+	elif 'FALSE'.startswith(ua):
+		return False
+	else:
+		print(f'ERROR: check passed argument for {arg}.')
+
 def main(raw_args=None):
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-date", required=True, help="Date of observation in YYYYMMDD format.")
@@ -1750,10 +1782,10 @@ def main(raw_args=None):
 	ap.add_argument("-edge_limit",required=False,default=55,help="Minimum separation a source has from the detector edge to be considered as a reference star.",type=float)
 	ap.add_argument("-dimness_limit",required=False,default=0.05,help="Minimum flux a reference star can have compared to the target to be considered as a reference star.",type=float)
 	ap.add_argument("-targ_distance_limit",required=False,default=2000,help="Maximum distance a source can be from the target in pixels to be considered as a reference star.",type=float)
-	ap.add_argument("-overwrite_refs",required=False,default=False,help="Whether or not to overwrite previous reference star output.",type=bool)
-	ap.add_argument("-centroid",required=False,default=True,help="Whether or not to centroid during aperture photometry.",type=bool)
-	ap.add_argument("-live_plot",required=False,default=True,help="Whether or not to plot the photometry as it is performed.",type=bool)
-	ap.add_argument("-regress_flux",required=False,default=False,help="Whether or not to perform a regression of relative target flux against ancillary variables (airmass, x/y position, FWHM, etc.).",type=bool)
+	ap.add_argument("-overwrite_refs",required=False,default=False,help="Whether or not to overwrite previous reference star output.",type=str)
+	ap.add_argument("-centroid",required=False,default=True,help="Whether or not to centroid during aperture photometry.",type=str)
+	ap.add_argument("-live_plot",required=False,default=True,help="Whether or not to plot the photometry as it is performed.",type=str)
+	ap.add_argument("-regress_flux",required=False,default=False,help="Whether or not to perform a regression of relative target flux against ancillary variables (airmass, x/y position, FWHM, etc.).",type=str)
 
 	args = ap.parse_args(raw_args)
 
@@ -1765,10 +1797,12 @@ def main(raw_args=None):
 	edge_limit = args.edge_limit
 	dimness_limit = args.dimness_limit
 	targ_distance_limit = args.targ_distance_limit
-	overwrite_refs = args.overwrite_refs
-	centroid = args.centroid
-	live_plot = args.live_plot
-	regress_flux = args.regress_flux
+	overwrite_refs = t_or_f(args.overwrite_refs)
+	centroid = t_or_f(args.centroid)
+	live_plot = t_or_f(args.live_plot)
+	regress_flux = t_or_f(args.regress_flux)
+
+	
 	
 	#Define base paths
 	global fpath, lcpath
