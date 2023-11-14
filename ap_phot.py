@@ -8,7 +8,7 @@ plt.ion()
 from matplotlib import gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from astropy.visualization import ImageNormalize, ZScaleInterval, simple_norm
-from astropy.convolution import Gaussian2DKernel
+from astropy.convolution import Gaussian1DKernel, Gaussian2DKernel, interpolate_replace_nans
 from astropy.coordinates import SkyCoord, get_moon
 from astropy.io import fits
 from astropy.wcs import WCS
@@ -17,14 +17,17 @@ from astropy.modeling import models, fitting
 from astropy import coordinates as coord
 from astropy import units as u
 from astropy.time import Time
+from astropy.table import Table, QTable
+from astropy.nddata import NDData
 import astropy.units as u 
 from astroquery.gaia import Gaia
 Gaia.MAIN_GAIA_TABLE = 'gaiadr3.gaia_source'
 from photutils import make_source_mask
 from photutils.detection import DAOStarFinder, IRAFStarFinder
+from photutils.psf import BasicPSFPhotometry, IntegratedGaussianPRF, DAOGroup, extract_stars, EPSFBuilder
 from photutils.background import Background2D, MedianBackground
 from photutils.aperture import CircularAperture, EllipticalAperture, CircularAnnulus, aperture_photometry
-from photutils.centroids import centroid_1dg, centroid_2dg
+from photutils.centroids import centroid_1dg, centroid_2dg, centroid_com, centroid_quadratic
 from scipy.stats import sigmaclip, pearsonr, linregress
 from scipy.spatial.distance import cdist
 from scipy.signal import correlate2d, fftconvolve, savgol_filter
@@ -60,7 +63,7 @@ def get_flattened_files(date, target, ffname):
 			sorted_files (numpy array): array of flattened files ordered by exposure number
 	'''
 
-	ffolder = fpath+'/'+date+'/'+target+'/'+ffname
+	ffolder = '/data/tierras/flattened/'+date+'/'+target+'/'+ffname
 	red_files = []
 	for file in os.listdir(ffolder): 
 		if '_red.fit' in file:
@@ -545,21 +548,38 @@ def jd_utc_to_bjd_tdb(jd_utc, ra, dec, location='Whipple'):
     ltt_bary = input_jd_utc.light_travel_time(target)
     return (input_jd_utc.tdb + ltt_bary).value
 
-def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, an_out=60, centroid=False, live_plot=False):
+def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, an_out=60, centroid=False, live_plot=False, type='fixed'):
 	ffname = file_list[0].parent.name	
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
 
-	#file_list = file_list[100:] #TESTING!!!
+	#file_list = file_list[-2:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
 	SATURATION_TRESHOLD = 55000. #ADU
 	PLATE_SCALE = 0.43 #arcsec pix^-1, from Juliana's dissertation Table 1.1
 	
-	# cutout_output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/target_cutouts/'
-	# if not os.path.exists(cutout_output_path):
-	# 	os.mkdir(cutout_output_path)
+	#If doing variable aperture photometry, read in FWHM X/Y data and set aperture radii 
+	if type == 'variable':
+		fwhm_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/fwhm.csv'
+		if not os.path.exists(fwhm_path):
+			raise RuntimeError(f'{fwhm_path} does not exist! You have to run ap_range first.')
+		else:
+			fwhm_df = pd.read_csv(fwhm_path)
+			fwhm_x = np.array(fwhm_df['FWHM X'])
+			fwhm_y = np.array(fwhm_df['FWHM Y'])
+			v1, l1, h1 = sigmaclip(fwhm_x)
+			v2, l2, h2 = sigmaclip(fwhm_y)
+			bad_inds = np.where((fwhm_x<l1)|(fwhm_x>h1)|(fwhm_y<l2)|(fwhm_y>h2))[0]
+			fwhm_x[bad_inds] = np.nan
+			fwhm_y[bad_inds] = np.nan
+			fwhm_x = interpolate_replace_nans(fwhm_x, kernel=Gaussian1DKernel(5))
+			fwhm_y = interpolate_replace_nans(fwhm_y, kernel=Gaussian1DKernel(5))
+			mean_fwhm = np.mean([fwhm_x,fwhm_y],axis=0)
+			smoothed_fwhm_arcsec = savgol_filter(mean_fwhm, 11, 3)
+			smoothed_fwhm_pix = smoothed_fwhm_arcsec/PLATE_SCALE
+
 	#Set up arrays for doing photometry 
 
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH FILE
@@ -770,39 +790,13 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 				x_pos_image = x_pos_cutout + int(x_pos_image) - an_out
 				y_pos_image = y_pos_cutout + int(y_pos_image) - an_out
 
-				# if j == 0:
-				# 	plt.figure()
-				# 	plt.imshow(cutout, origin='lower', interpolation='none', norm=simple_norm(cutout, 'linear', min_percent=1, max_percent=90))
-				# 	breakpoint()
-				# 	plt.close()
-				
-				
-				# #Verify that the cutout position matches the image position
-				# fig2, ax2 = plt.subplots(1,2,figsize=(10,8))
-				# #norm = ImageNormalize(cutout,interval=ZScaleInterval())
-				# norm = simple_norm(cutout, 'linear', min_percent=1, max_percent=99)
-				# ax2[0].imshow(source_data, origin='lower', norm=norm, interpolation='none')
-				# ax2[0].set_ylim(int(y_pos_image-an_out),int(y_pos_image+an_out))
-				# ax2[0].set_xlim(int(x_pos_image-an_out),int(x_pos_image+an_out))
-				# ax2[0].plot(x_pos_image,y_pos_image,'rx',mew=2,ms=8)
-				# ap_circ = plt.Circle((x_pos_image,y_pos_image),13,fill=False,color='r',lw=2)
-				# ax2[0].add_patch(ap_circ)
-				# ax2[0].set_ylim(y_pos_image-15,y_pos_image+15)
-				# ax2[0].set_xlim(x_pos_image-15,x_pos_image+15)
-				# #ap = CircularAperture((x_pos_image,y_pos_image),r=ap_radii[0])
-				# #ap.plot(color='r',lw=2.5)
-
-				# ax2[1].imshow(cutout,origin='lower',norm=norm,interpolation='none')
-				# ax2[1].plot(x_pos_cutout,y_pos_cutout,'kx',mew=2,ms=8)
-				# ap_circ = plt.Circle((x_pos_cutout,y_pos_cutout),13,fill=False,color='k',lw=2)
-				# ax2[1].add_patch(ap_circ)
-				# ax2[1].set_ylim(y_pos_cutout-15,y_pos_cutout+15)
-				# ax2[1].set_xlim(x_pos_cutout-15,x_pos_cutout+15)
-				# breakpoint()
-				# plt.close()
 
 			for k in range(len(ap_radii)):
-				ap = CircularAperture((x_pos_cutout,y_pos_cutout),r=ap_radii[k])
+				if type == 'fixed':
+					ap = CircularAperture((x_pos_cutout,y_pos_cutout),r=ap_radii[k])
+				elif type == 'variable':
+					ap = CircularAperture((x_pos_cutout,y_pos_cutout),r=ap_radii[k]*smoothed_fwhm_pix[i])
+
 				#ap = EllipticalAperture((x_pos_cutout,y_pos_cutout),a=15,b=9, theta=90*np.pi/180)
 				an = CircularAnnulus((x_pos_cutout,y_pos_cutout),r_in=an_in,r_out=an_out)
 
@@ -812,7 +806,7 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 					ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm,cmap='Greys_r')
 					#ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm)
 					ax[1,0].plot(x_pos_cutout,y_pos_cutout, color='m', marker='x',mew=1.5,ms=8)
-					ap_circle = plt.Circle((x_pos_cutout,y_pos_cutout),ap_radii[k],fill=False,color='m',lw=2)
+					ap_circle = plt.Circle((x_pos_cutout,y_pos_cutout),ap.r,fill=False,color='m',lw=2)
 					an_in_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_in,fill=False,color='m',lw=2)
 					an_out_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_out,fill=False,color='m',lw=2)
 					ax[1,0].add_patch(ap_circle)
@@ -837,8 +831,10 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 						ax[0,0].add_patch(ap_circle)
 						ax[0,0].text(source_x[l,i]+15,source_y[l,i]+15,name,color=color,fontsize=14)
 
-
-				source_radii[k,i] = ap_radii[k]
+				if type == 'fixed':
+					source_radii[k,i] = ap_radii[k]
+				elif type == 'variable':
+					source_radii[k,i] = ap_radii[k]*smoothed_fwhm_pix[i]
 				an_in_radii[k,i] = an_in
 				an_out_radii[k,i] = an_out
 
@@ -857,82 +853,14 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 					non_linear_flags[k,j,i] = 1
 
 				#Estimate background 
-
 				#Determine which pixels are in the annulus using their distances from (x_pos_cutout,y_pos_cutout)
 				dists = np.sqrt((x_pos_cutout-xx)**2+(y_pos_cutout-yy)**2)
 				an_inds = np.where((dists<an_out)&(dists>an_in))  
 				an_data = cutout[an_inds]
 
-				#annulus_mask = an.to_mask(method='center').data
-				#try:
-				#	an_data = annulus_mask * cutout
-				#except:
-				#	#If the annulus extends off the edge, this will fail. 
-				#	#Need to cut down the annulus mask to match the shape of the cutout. 
-				#	#TODO: test on sources on left, top, and right edges. 
-				#	y_diff = annulus_mask.shape[0]-cutout.shape[0]
-				#	x_diff = annulus_mask.shape[1]-cutout.shape[1]
-				#	
-				#	if y_pos_cutout + an_out > cutout.shape[0]:
-				#		annulus_mask = annulus_mask[0:cutout.shape[0],:]
-				#	if y_pos_cutout - an_out < 0:
-				#		annulus_mask = annulus_mask[y_diff:,:]
-				#	if x_pos_cutout + an_out > cutout.shape[1]:
-				#		annulus_mask = annulus_mask[:,0:cutout.shape[1]]
-				#	if x_pos_cutout - an_out < 0:
-				#		annulus_mask = annulus_mask[:,x_diff:]
-				#	#if y_pos_image < an_out: 
-				#	#	annulus_mask = annulus_mask[y_diff:,:]
-				#	#if y_pos_image > source_data.shape[0]-an_out:
-				#	#	annulus_mask = annulus_mask[0:cutout.shape[0],:]
-				#	#if x_pos_image < an_out:
-				#	#	annulus_mask = annulus_mask[:,x_diff:]
-				#	#if x_pos_image > source_data.shape[1]-an_out:
-				#	#	annulus_mask = annulus_mask[:,0:cutout.shape[1]]
-				#	breakpoint()
-				#	an_data = annulus_mask * cutout 
-
-				#NEW
 				v, l, h = sigmaclip(an_data[an_data!=0],2,2)
 				bkg = np.mean(v)
 
-				# #ORIGINAL: 
-				# #Do sep extraction and return segmentation map to mask out sources in the annulus
-				# try:
-				# 	bkg = sep.Background(cutout)
-				# except:
-				# 	bkg = sep.Background(cutout.byteswap().newbyteorder())
-				# bkg_subtracted_cutout = cutout-bkg.back()
-				# try:
-				# 	objs, seg_map = sep.extract(bkg_subtracted_cutout, 4, segmentation_map=True)
-				# except:
-				# 	objs, seg_map = sep.extract(bkg_subtracted_cutout.byteswap().newbyteorder(), 4, segmentation_map=True)
-		
-				# source_mask = np.ones(np.shape(cutout),dtype='int')
-				# source_mask[np.where(seg_map>0)] = 0
-
-				# # #Plot the source mask
-				# # fig, ax = plt.subplots(1,2,figsize=(10,7))
-				# # ax[0].imshow(an_data, origin='lower',norm=ImageNormalize(an_data[an_data!=0],interval=ZScaleInterval()),interpolation='none')
-				# # ax[1].imshow(source_mask, origin='lower',vmin=0,vmax=1,interpolation='none')
-				# # breakpoint()
-
-				# an_data_masked = an_data*source_mask 
-				# an_data_1d = an_data_masked[an_data_masked != 0] #unwrap into 1d array
-
-
-				# #Discard any negative values in the annulus
-				# an_data_1d = an_data_1d[np.where(an_data_1d>0)[0]]
-
-				# an_vals, hi, lo = sigmaclip(an_data_1d,3,3) #toss outliers
-				# bkg = np.mean(an_vals) #take median of remaining values as per-pixel background estimate
-
-				# plt.figure()
-				# plt.hist(an_vals,bins=15)
-				# plt.axvline(bkg, color='tab:orange')
-				# breakpoint()
-				# plt.close()
-				
 				source_sky_ADU[j,i] = bkg
 				source_sky_e[j,i] = bkg*GAIN
 				source_minus_sky_ADU[k,j,i] = phot_table['aperture_sum'][0]-bkg*ap.area 
@@ -945,8 +873,6 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 				scintillation_abs_e = scintillation_rel * source_minus_sky_e[k,j,i] #Don't know if this should be multiplied by the average source flux or the flux in this frame
 				source_minus_sky_err_e[k,j,i] = np.sqrt(phot_table['aperture_sum'][0]*GAIN + bkg*ap.area*GAIN + DARK_CURRENT*source_header['EXPTIME']*ap.area + ap.area*READ_NOISE**2 + scintillation_abs_e**2)
 				source_minus_sky_err_ADU[k,j,i] = source_minus_sky_err_e[k,j,i]/GAIN
-
-				
 
 				#Measure shape by fitting a 2D Gaussian to the cutout.
 				#Don't do for every aperture size, just do it once. 
@@ -1030,8 +956,8 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 
 	#Write out photometry. 
 	for i in range(len(ap_radii)):
-		output_path = Path('/data/tierras/lightcurves/'+date+'/'+target+'/'+ffname+f'/circular_fixed_ap_phot_{ap_radii[i]}.csv')
-
+		output_path = Path('/data/tierras/lightcurves/'+date+'/'+target+'/'+ffname+f'/circular_{type}_ap_phot_{ap_radii[i]}.csv')
+		
 		output_list = []
 		output_header = []
 		
@@ -1156,6 +1082,395 @@ def fixed_circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in
 
 	plt.close('all')
 	return 
+
+def psf_photometry(file_list, targ_and_refs, an_in=30, an_out=50, centroid=False, live_plot=False):
+	ffname = file_list[0].parent.name	
+	target = file_list[0].parent.parent.name
+	date = file_list[0].parent.parent.parent.name 
+
+	#file_list = file_list[-2:] #TESTING!!!
+	
+	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
+	NONLINEAR_THRESHOLD = 40000. #ADU
+	SATURATION_TRESHOLD = 55000. #ADU
+	PLATE_SCALE = 0.43 #arcsec pix^-1, from Juliana's dissertation Table 1.1
+	
+	#Set up arrays for doing photometry 
+
+	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH FILE
+	filenames = []
+	mjd_utc = np.zeros(len(file_list),dtype='float')
+	jd_utc = np.zeros(len(file_list),dtype='float')
+	bjd_tdb = np.zeros(len(file_list),dtype='float')
+	airmasses = np.zeros(len(file_list),dtype='float16')
+	ccd_temps = np.zeros(len(file_list),dtype='float16')
+	exp_times = np.zeros(len(file_list),dtype='float16')
+	dome_temps = np.zeros(len(file_list),dtype='float16')
+	focuses = np.zeros(len(file_list),dtype='float16')
+	dome_humidities = np.zeros(len(file_list),dtype='float16')
+	sec_temps = np.zeros(len(file_list),dtype='float16')
+	ret_temps = np.zeros(len(file_list),dtype='float16')
+	pri_temps = np.zeros(len(file_list),dtype='float16')
+	rod_temps = np.zeros(len(file_list),dtype='float16')
+	cab_temps = np.zeros(len(file_list),dtype='float16')
+	inst_temps = np.zeros(len(file_list),dtype='float16')
+	temps = np.zeros(len(file_list),dtype='float16')
+	humidities = np.zeros(len(file_list),dtype='float16')
+	dewpoints = np.zeros(len(file_list),dtype='float16')
+	sky_temps = np.zeros(len(file_list),dtype='float16')
+	lunar_distance = np.zeros(len(file_list),dtype='float16')
+	
+	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH SOURCE IN EACH FILE
+	source_x = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_y = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_sky_ADU = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_sky_e = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_x_fwhm_arcsec = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_y_fwhm_arcsec = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_theta_radians = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+
+	#ARRAYS THAT CONTAIN DATA PERTAININING TO EACH APERTURE RADIUS FOR EACH SOURCE FOR EACH FILE
+	source_minus_sky_ADU = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_minus_sky_e = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_minus_sky_err_ADU = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	source_minus_sky_err_e = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	non_linear_flags = np.zeros((len(targ_and_refs),len(file_list)),dtype='bool')
+	saturated_flags = np.zeros((len(targ_and_refs),len(file_list)),dtype='bool')
+	ensemble_alc_ADU = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	ensemble_alc_e = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	ensemble_alc_err_ADU = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	ensemble_alc_err_e = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	relative_flux = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	relative_flux_err = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	
+	#Load in the stacked image of the field that was used for source identification. 
+	#All images will be cross-correlated with this to determine aperture positions. 
+	bpm = load_bad_pixel_mask()
+	#Extra masking in case you need to fall back on astroalign, which does source detection. 
+	bpm[0:1032, 1447:1464] = True
+	bpm[1023:, 1788:1801]  = True
+	#25-pixel mask on all edges
+	bpm[:, 0:25+1] = True
+	bpm[:,4096-1-25:] = True
+	bpm[0:25+1,:] = True
+	bpm[2048-1-25:,:] = True
+
+	reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
+
+	#reference_image_hdu = fits.open(file_list[1])[0]
+
+	reference_image_header = reference_image_hdu.header
+	reference_wcs = WCS(reference_image_header)
+	reference_world_coordinates = [reference_wcs.pixel_to_world(targ_and_refs['x'][i],targ_and_refs['y'][i]) for i in range(len(targ_and_refs))] #Get world coordinates of target and reference stars in the reference image. 
+
+	#reference_image_data = np.ma.array(reference_image_hdu.data, mask=bpm)
+	reference_image_data = reference_image_hdu.data
+	reference_image_data[np.where(bpm==1)] = np.nan
+
+	#Background-subtract the data for figuring out shifts	
+	try:
+		bkg = sep.Background(reference_image_data)
+	except:
+		bkg = sep.Background(reference_image_data.byteswap().newbyteorder())
+
+	reference_image_data -= bkg.back()
+	
+	n_files = len(file_list)
+	if live_plot:
+		#fig, ax = plt.subplots(2,2,figsize=(16,9))
+		fig = plt.figure(figsize=(16,9))
+		gs = gridspec.GridSpec(2,4,figure=fig)
+		ax1 = fig.add_subplot(gs[0,0:2])
+		ax2 = fig.add_subplot(gs[1,0])
+		ax3 = fig.add_subplot(gs[1,1])
+		ax4 = fig.add_subplot(gs[0,2:])
+		ax5 = fig.add_subplot(gs[1,2:])
+
+	print(f'Doing PSF photometry on {n_files} images.\n')
+	time.sleep(2)
+	for i in range(n_files):
+		print(f'{i+1} of {n_files}')
+		source_hdu = fits.open(file_list[i])[0]
+		source_header = source_hdu.header
+		source_data = source_hdu.data #TODO: Should we ignore BPM pixels?
+
+		GAIN = source_header['GAIN'] #e- ADU^-1
+		READ_NOISE = source_header['READNOIS'] #e-
+		EXPTIME = source_header['EXPTIME']
+		RA = source_header['RA']
+		DEC = source_header['DEC']
+
+		#SAVE ANCILLARY DATA
+		filenames.append(file_list[i].name)
+		mjd_utc[i] = source_header['MJD-OBS'] + (EXPTIME/2)/(24*60*60) #MJD-OBS is the modified julian date at the start of the exposure. Add on half the exposure time in days to get the time at mid-exposure. 
+		jd_utc[i] = mjd_utc[i]+2400000.5 #Convert MJD_UTC to JD_UTC
+		bjd_tdb[i] = jd_utc_to_bjd_tdb(jd_utc[i], RA, DEC)
+		airmasses[i] = source_header['AIRMASS']
+		ccd_temps[i] = source_header['CCDTEMP']
+		exp_times[i] = source_header['EXPTIME']
+		dome_temps[i] = source_header['DOMETEMP']
+		focuses[i] = source_header['FOCUS']
+		dome_humidities[i] = source_header['DOMEHUMI']
+		#These keywords are sometimes missing
+		try:
+			sec_temps[i] = source_header['SECTEMP']
+			rod_temps[i] = source_header['RODTEMP']
+			cab_temps[i] = source_header['CABTEMP']
+			inst_temps[i] = source_header['INSTTEMP']
+			ret_temps[i] = source_header['RETTEMP']
+			pri_temps[i] = source_header['PRITEMP']
+		except:
+			sec_temps[i] = np.nan
+			rod_temps[i] = np.nan
+			cab_temps[i] = np.nan
+			inst_temps[i] = np.nan
+			ret_temps[i] = np.nan
+			pri_temps[i] = np.nan
+
+		temps[i] = source_header['TEMPERAT']
+		humidities[i] = source_header['HUMIDITY']
+		dewpoints[i] = source_header['DEWPOINT']
+		sky_temps[i] = source_header['SKYTEMP']
+
+		lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i])
+
+		#UPDATE SOURCE POSITIONS
+		#METHOD 1: WCS
+		source_wcs = WCS(source_header)
+		transformed_pixel_coordinates = [source_wcs.world_to_pixel(reference_world_coordinates[i]) for i in range(len(reference_world_coordinates))]
+			
+		
+		#Save transformed pixel coordinates of sources
+		for j in range(len(targ_and_refs)):
+			source_x[j,i] = transformed_pixel_coordinates[j][0]
+			source_y[j,i] = transformed_pixel_coordinates[j][1]
+		
+		# fig2, ax2 = plot_image(source_data)
+		# for j in range(len(source_x[:,i])):
+		# 	ax2.plot(source_x[j,i],source_y[j,i],'rx')
+		# breakpoint()
+
+		#DO PHOTOMETRY AT UPDATED SOURCE POSITIONS FOR ALL SOURCES AND ALL APERTURES
+		for j in range(len(targ_and_refs)):
+			x_pos_image = source_x[j,i]
+			y_pos_image = source_y[j,i]
+
+			#Check that the source position falls on the chip. If not, set its measured fluxes to NaNs.
+			#TODO: NaN all the quantities you want to ignore. 
+			if (x_pos_image < 0) or (x_pos_image > 4095) or (y_pos_image < 0) or (y_pos_image > 2047):
+				source_minus_sky_ADU[j,i] = np.nan
+				continue
+			
+			#Set up the source cutout
+			cutout_y_start = int(y_pos_image-an_out)
+			if cutout_y_start < 0:
+				cutout_y_start = 0
+			cutout_y_end = int(y_pos_image+an_out)
+			if cutout_y_end > 2047:
+				cutout_y_end = 2047
+			cutout_x_start = int(x_pos_image-an_out)
+			if cutout_x_start < 0:
+				cutout_x_start = 0
+			cutout_x_end = int(x_pos_image+an_out)
+			if cutout_x_end > 4095:
+				cutout_x_end = 4095
+
+			cutout = source_data[cutout_y_start:cutout_y_end+1,cutout_x_start:cutout_x_end+1]
+			#cutout = cutout[40:60,40:60] #TESTING
+			cutout = cutout.copy(order='C')
+			xx,yy = np.meshgrid(np.arange(cutout.shape[1]),np.arange(cutout.shape[0]))
+
+			#x_pos_cutout = x_pos_image-int(x_pos_image)+an_out
+			#y_pos_cutout = y_pos_image-int(y_pos_image)+an_out
+			x_pos_cutout = x_pos_image-int(x_pos_image)+int(cutout.shape[1]/2)
+			y_pos_cutout = y_pos_image-int(y_pos_image)+int(cutout.shape[0]/2)
+			#breakpoint()
+			if j == 0 and live_plot:
+				norm = simple_norm(cutout,'linear',min_percent=0,max_percent=98.)
+				ax2.imshow(cutout,origin='lower',interpolation='none',norm=norm,cmap='Greys_r')
+				#ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm)
+				ax2.plot(x_pos_cutout,y_pos_cutout, color='m', marker='x',mew=1.5,ms=8)
+				#ap_circle = plt.Circle((x_pos_cutout,y_pos_cutout),ap_radii[k],fill=False,color='m',lw=2)
+				an_in_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_in,fill=False,color='m',lw=2)
+				an_out_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_out,fill=False,color='m',lw=2)
+				#ax2.add_patch(ap_circle)
+				ax2.add_patch(an_in_circle)
+				ax2.add_patch(an_out_circle)
+				ax2.set_xlim(0,cutout.shape[1])
+				ax2.set_ylim(0,cutout.shape[0])
+				ax2.grid(False)
+				ax2.set_title('Target')
+
+				ax1.imshow(source_data,origin='lower',interpolation='none',norm=simple_norm(source_data,'linear',min_percent=1,max_percent=99.9), cmap='Greys_r')
+				ax1.grid(False)
+				ax1.set_title(file_list[i].name)
+				for l in range(len(source_x)):
+					if l == 0:
+						color = 'm'
+						name = 'T'
+					else:
+						color = 'tab:red'
+						name = f'R{l}'
+					ap_circle = plt.Circle((source_x[l,i],source_y[l,i]),30,fill=False,color=color,lw=1)
+					ax1.add_patch(ap_circle)
+					ax1.text(source_x[l,i]+15,source_y[l,i]+15,name,color=color,fontsize=14)
+
+			#Do PSF photometry on x/y cutout position
+
+			# #METHOD 1: IntegratedGaussianPRF
+			# #TODO: the IntegratedGaussianPRF model does not include a rotation term...
+			# init_params = QTable()
+			# init_params['x_0'] = [x_pos_cutout]
+			# init_params['y_0'] = [y_pos_cutout]
+			# psf_model = IntegratedGaussianPRF()
+			# psf_model.sigma.fixed = False
+			# psf_model.x_0.fixed = True
+			# psf_model.y_0.fixed = True
+			# psfphot = BasicPSFPhotometry(DAOGroup(8), MedianBackground(), psf_model, fitshape=(5,5))
+			# result = psfphot(cutout, init_guesses=init_params)
+			# if len(result) > 1:
+			# 	#TODO: handling if more than one source is modeled....
+			# 	breakpoint()
+			# psf_flux = result['flux_fit'].value[0]
+			# psf_flux_err = result['flux_unc'].value[0]
+
+			#METHOD 2: Effective Point Spead Function
+			if j == 0: #Only build once per image
+				stars_tbl = Table()
+				stars_tbl['x'] = targ_and_refs['x'][1:]
+				stars_tbl['y'] = targ_and_refs['y'][1:]
+				mean_val, median_val, std_val = sigma_clipped_stats(source_data, sigma=2.0)  
+				nddata = NDData(data=source_data-median_val)
+				stars = extract_stars(nddata, stars_tbl, size=20) 
+				epsf_builder = EPSFBuilder(oversampling=2, maxiters=3,progress_bar=False, recentering_func=centroid_com)  
+				psf_model, fitted_stars = epsf_builder(stars)  
+
+			init_params = QTable()
+			init_params['x_0'] = [x_pos_cutout]
+			init_params['y_0'] = [y_pos_cutout]
+			psf_model.x_0.fixed = False
+			psf_model.x_0.bounds = (x_pos_cutout-1,x_pos_cutout+1)
+			psf_model.y_0.fixed = False
+			psf_model.y_0.bounds = (y_pos_cutout-1,y_pos_cutout+1)
+
+			psfphot = BasicPSFPhotometry(DAOGroup(4), MedianBackground(), psf_model, fitshape=(11,11), aperture_radius=3)
+			result = psfphot(cutout, init_guesses=init_params)
+			breakpoint()
+			if len(result) > 1:
+				#TODO: handling if more than one source is modeled....
+				breakpoint()
+			psf_flux = result['flux_fit'].value[0]
+			psf_flux_err = result['flux_unc'].value[0]
+
+
+			source_minus_sky_ADU[j,i] = psf_flux
+			source_minus_sky_e[j,i] = source_minus_sky_ADU[j,i]*GAIN
+			
+			if j == 0 and live_plot:
+				#psf_model_fit = IntegratedGaussianPRF(flux=result['flux_fit'].value[0], x_0=result['x_fit'].value[0], y_0=result['y_fit'].value[0], sigma=result['sigma_fit'].value[0])
+				psf_model.flux = result['flux_fit'].value[0]
+				psf_model.x_0 = result['x_fit'].value[0]
+				psf_model.y_0 = result['y_fit'].value[0]
+				ax3.imshow(cutout-psf_model(xx,yy),origin='lower',norm=norm, cmap='Greys_r')
+				ax3.set_title('Target Residual Image')
+				breakpoint()
+
+			# #Check for non-linear/saturated pixels in the aperture
+			#TODO: Don't know how to do this with PSF photometry...
+			# max_pix = np.max(ap.to_mask().multiply(cutout))
+			# if max_pix >= SATURATION_TRESHOLD:
+			# 	saturated_flags[k,j,i] = 1
+			# if max_pix >= NONLINEAR_THRESHOLD:
+			# 	non_linear_flags[k,j,i] = 1
+
+			#Estimate background 
+			#Determine which pixels are in the annulus using their distances from (x_pos_cutout,y_pos_cutout)
+			dists = np.sqrt((x_pos_cutout-xx)**2+(y_pos_cutout-yy)**2)
+			an_inds = np.where((dists<an_out)&(dists>an_in))  
+			an_data = cutout[an_inds]
+			v, l, h = sigmaclip(an_data[an_data!=0],2,2)
+			bkg = np.mean(v)
+			source_sky_ADU[j,i] = bkg
+			source_sky_e[j,i] = bkg*GAIN
+			
+			#Calculate uncertainty
+			#Right now, use sqrt of flux from the PSF fit as the source photon noise uncertainty estimate. 
+			#Could alternatively use the 'flux_unc' entry from the result table, not sure which is better
+			
+			scintillation_rel = 0.09*(130)**(-2/3)*airmasses[i]**(7/4)*(2*EXPTIME)**(-1/2)*np.exp(-2306/8000)
+			scintillation_abs_e = scintillation_rel * source_minus_sky_e[j,i] #Don't know if this should be multiplied by the average source flux or the flux in this frame
+
+			#TODO: not sure about these error calculations. How do you incoporate read noise/ sky noise/ dark current into PSF photometry?  
+			source_minus_sky_err_e[j,i] = np.sqrt((psf_flux_err*GAIN)**2 + scintillation_abs_e**2)
+			source_minus_sky_err_ADU[j,i] = source_minus_sky_err_e[j,i]/GAIN
+
+			#Save PSF shape information		
+			x_stddev_pix = result['x_fit'].value[0]
+			y_stddev_pix = result['y_fit'].value[0]
+			x_fwhm_pix = x_stddev_pix * 2*np.sqrt(2*np.log(2))
+			y_fwhm_pix = y_stddev_pix * 2*np.sqrt(2*np.log(2))
+			x_fwhm_arcsec = x_fwhm_pix * PLATE_SCALE
+			y_fwhm_arcsec = y_fwhm_pix * PLATE_SCALE
+			#theta_rad = g.theta.value
+			source_x_fwhm_arcsec[j,i] = x_fwhm_arcsec
+			source_y_fwhm_arcsec[j,i] = y_fwhm_arcsec
+			#source_theta_radians[j,i] = theta_rad
+
+			#Plot normalized target source-sky as you go along
+			if live_plot and j == 0:
+				target_renorm_factor = np.nanmean(source_minus_sky_ADU[j,0:i+1])
+				targ_norm = source_minus_sky_ADU[j,0:i+1]/target_renorm_factor
+				targ_norm_err = source_minus_sky_err_ADU[j,0:i+1]/target_renorm_factor
+				
+				ax4.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k',label='Normalized target flux')
+				#plt.ylim(380000,440000)
+				ax4.set_ylabel('Normalized Flux')
+
+		#Create ensemble ALCs (summed reference fluxes with no weighting) for each source
+		for l in range(len(targ_and_refs)):
+			#For the target, use all reference stars
+			ref_inds = np.arange(1,len(targ_and_refs))
+			#For the reference stars, use all other references and NOT the target
+			if l != 0:
+				ref_inds = np.delete(ref_inds,l-1)
+			ensemble_alc_ADU[l,i] = sum(source_minus_sky_ADU[ref_inds,i])
+			ensemble_alc_err_ADU[l,i] = np.sqrt(np.sum(source_minus_sky_err_ADU[ref_inds,i]**2))
+			ensemble_alc_e[l,i] = sum(source_minus_sky_e[ref_inds,i])
+			ensemble_alc_err_e[l,i] = np.sqrt(np.sum(source_minus_sky_err_e[ref_inds,i]**2))
+
+			relative_flux[l,i] = source_minus_sky_ADU[l,i]/ensemble_alc_ADU[l,i]
+			relative_flux_err[l,i] = np.sqrt((source_minus_sky_err_ADU[l,i]/ensemble_alc_ADU[l,i])**2+(source_minus_sky_ADU[l,i]*ensemble_alc_err_ADU[l,i]/(ensemble_alc_ADU[l,i]**2))**2)
+
+		if live_plot:
+			alc_renorm_factor = np.nanmean(ensemble_alc_ADU[0,0:i+1]) #This means, grab the ALC associated with the ap_plot_ind'th aperture for the 0th source (the target) in all images up to and including this one.
+			alc_norm = ensemble_alc_ADU[0,0:i+1]/alc_renorm_factor
+			alc_norm_err = ensemble_alc_err_ADU[0,0:i+1]/alc_renorm_factor
+			v,l,h=sigmaclip(alc_norm[~np.isnan(alc_norm)])
+			ax4.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ALC flux')
+			try:
+				ax4.set_ylim(l,h)
+			except:
+				breakpoint()
+			ax4.legend() 
+
+			corrected_flux = targ_norm/alc_norm
+			corrected_flux_err = np.sqrt((targ_norm_err/alc_norm)**2+(targ_norm*alc_norm_err/(alc_norm**2))**2)
+			v,l,h=sigmaclip(corrected_flux)
+			ax5.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Corrected target flux')
+			ax5.set_ylim(l,h)
+			ax5.legend()
+			ax5.set_ylabel('Normalized Flux')
+			ax5.set_xlabel(f'Time - {int(bjd_tdb[0]):d}'+' (BJD$_{TDB}$)')
+			#plt.tight_layout()
+			plt.suptitle(f'{i+1} of {n_files}')
+			#plt.savefig(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/live_plots/{str(i+1).zfill(4)}.jpg',dpi=100)
+			#breakpoint()
+			plt.pause(0.01)
+			ax1.cla()
+			ax2.cla()
+			ax3.cla()
+			ax4.cla()
+			ax5.cla()
 
 def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
 	date = file_path.parent.parent.parent.name
@@ -1402,26 +1717,33 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 	df = pd.read_csv(lc_path)
 	targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
 	n_refs = len(targ_and_refs)-1
+
+	if n_refs == 1:
+		print('Only 1 reference, cannot create reference ALC.')
+		return
+
 	times = np.array(df['BJD TDB'])
 
 	for i in range(n_refs):
 		print(f'Doing Ref {i+1} of {n_refs}')
 		rel_flux = np.array(df[f'Ref {i+1} Relative Flux'])
 		rel_flux_err = np.array(df[f'Ref {i+1} Relative Flux Error'])
-
+		
 		#Sigma clip
 		v, l, h = sigmaclip(rel_flux)
 		use_inds = np.where((rel_flux>l)&(rel_flux<h))[0]
 		rel_flux = rel_flux[use_inds]
 		rel_flux_err = rel_flux_err[use_inds]
 
-		renorm = np.mean(rel_flux)
+		renorm = np.nanmean(rel_flux)
 		rel_flux /= renorm
 		rel_flux_err /= renorm
 
 		#print(f"bp_rp: {targ_and_refs['bp_rp'][i+1]}")
 		fig, ax = plt.subplots(1,1,figsize=(10,5),sharex=True)
 		
+		breakpoint()
+
 		bx, by, bye = tierras_binner(times[use_inds],rel_flux,bin_mins=bin_mins)
 
 		fig.suptitle(f'Reference {i+1}',fontsize=16)
@@ -1445,26 +1767,27 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 	return
 
 def tierras_binner(t, y, bin_mins=15):
-    x_offset = t[0]
-    t = t - x_offset
-    t = t*24*60
-    n_bins = int(np.ceil(t[-1]/bin_mins))
-    bx = np.zeros(n_bins)
-    by = np.zeros(n_bins)
-    bye = np.zeros(n_bins)
-    for i in range(n_bins):
-        if i == n_bins-1:
-            time_start = i*bin_mins
-            time_end = t[-1]+1
-        else:
-            time_start = i*bin_mins
-            time_end = (i+1)*bin_mins
-        bin_inds = np.where((t>=time_start)&(t<time_end))[0]
-        bx[i] = np.mean(t[bin_inds])/(24*60) + x_offset
-        by[i] = np.mean(y[bin_inds])
-        bye[i] = np.std(y[bin_inds])/np.sqrt(len(bin_inds))
-    
-    return bx, by, bye 
+	x_offset = t[0]
+	t = t - x_offset
+	t = t*24*60
+	n_bins = int(np.ceil(t[-1]/bin_mins))
+	bx = np.zeros(n_bins)
+	by = np.zeros(n_bins)
+	bye = np.zeros(n_bins)
+	for i in range(n_bins):
+		if i == n_bins-1:
+			time_start = i*bin_mins
+			time_end = t[-1]+1
+		else:
+			time_start = i*bin_mins
+			time_end = (i+1)*bin_mins
+		bin_inds = np.where((t>=time_start)&(t<time_end))[0]
+		bx[i] = np.mean(t[bin_inds])/(24*60) + x_offset
+		by[i] = np.mean(y[bin_inds])
+		bye[i] = np.std(y[bin_inds])/np.sqrt(len(bin_inds))
+
+	return bx, by, bye 
+	
 
 def tierras_binner_inds(t, bin_mins=15):
     x_offset = t[0]
@@ -1544,15 +1867,14 @@ def moving_average(x, w):
 
 def optimal_lc_chooser(date, target, ffname, start_time=0, stop_time=0, plot=False):
 	lc_list = np.array(glob(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/*phot*.csv'))
-	sort_inds = np.argsort([float(i.split('/')[-1].split('_')[-1].split('.')[0]) for i in lc_list])
+	sort_inds = np.argsort([float(i.split('/')[-1].split('_')[-1].split('.csv')[0]) for i in lc_list])
 	lc_list = lc_list[sort_inds]
-
 	if plot:
 		fig, ax = plt.subplots(len(lc_list),1,figsize=(10,1.25*len(lc_list)),sharex=True,sharey=True)
 	
-
 	best_stddev = 9999.
 	for i in range(len(lc_list)):
+		type = lc_list[i].split('/')[-1].split('_')[1]+' '+lc_list[i].split('/')[-1].split('_')[-1].split('.csv')[0]
 		df = pd.read_csv(lc_list[i])
 		times = np.array(df['BJD TDB'])
 		rel_targ_flux = np.array(df['Target Relative Flux'])
@@ -1603,7 +1925,7 @@ def optimal_lc_chooser(date, target, ffname, start_time=0, stop_time=0, plot=Fal
 			ax2.set_ylabel(lc_list[i].split('_')[-1].split('.csv')[0],rotation=270,labelpad=12)
 			ax2.set_yticks([])
 		#stddev = np.std(rel_targ_flux)
-		print(f'Median 5-min stddev: {med_stddev*1e6:.1f} ppm')
+		print(f'{type} median 5-min stddev: {med_stddev*1e6:.1f} ppm')
 		if med_stddev < best_stddev:
 			best_ind = i
 			best_lc_path = lc_list[i]
@@ -1631,15 +1953,16 @@ def ap_range(file_list, targ_and_refs, overwrite=False):
 
 
 	output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/aperture_range.csv'
+	output_path_2 = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/fwhm.csv'
 
-	if not (os.path.exists(output_path)) or (overwrite==True):
+	if not (os.path.exists(output_path)) or not (os.path.exists(output_path_2)) or (overwrite==True):
 
 		print('Determining optimal aperture range...')
 		time.sleep(2)
 
 		PLATE_SCALE = 0.43 #arcsec pix^-1, from Juliana's dissertation Table 1.1
 
-		bpm = load_bad_pixel_mask()
+		#bpm = load_bad_pixel_mask()
 
 		#load in the reference image 
 		reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
@@ -1692,6 +2015,10 @@ def ap_range(file_list, targ_and_refs, overwrite=False):
 			fwhm_x[i] = x_fwhm_arcsec
 			fwhm_y[i] = y_fwhm_arcsec
 			print(f'{i+1} of {len(file_list)}')
+		
+		fwhm_x_save = copy.deepcopy(fwhm_x)
+		fwhm_y_save = copy.deepcopy(fwhm_y)
+
 		#Sigma clip the results
 		v1,l1,h1 = sigmaclip(fwhm_x)
 		v2,l2,h2 = sigmaclip(fwhm_y) 
@@ -1719,6 +2046,12 @@ def ap_range(file_list, targ_and_refs, overwrite=False):
 		output_df = pd.DataFrame(output_dict)
 		output_df.to_csv(output_path,index=False)
 		set_tierras_permissions(output_path)
+
+		#Write out fwhm measurements
+		output_dict_2 = {'FWHM X':fwhm_x_save, 'FWHM Y':fwhm_y_save}
+		output_df_2 = pd.DataFrame(output_dict_2)
+		output_df_2.to_csv(output_path_2,index=False)
+		set_tierras_permissions(output_path_2)
 	else:
 		print(f'Restoring aperture range output from {output_path}.')
 		output_df = pd.read_csv(output_path)
@@ -1806,7 +2139,6 @@ def main(raw_args=None):
 	
 	#Define base paths
 	global fpath, lcpath
-	fpath = '/data/tierras/flattened'
 	lcpath = '/data/tierras/lightcurves'
 
 	if not os.path.exists(lcpath+f'/{date}'):
