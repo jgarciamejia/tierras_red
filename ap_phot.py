@@ -136,7 +136,7 @@ def plot_image(data,use_wcs=False,cmap_name='viridis'):
 	plt.tight_layout()
 	return fig, ax
 
-def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=False, nonlinear_limit=40000, dimness_limit=0.05, nearness_limit=15, edge_limit=50, targ_distance_limit=4000, nrefs=1000):
+def reference_star_chooser(file_list, target_position=(0,0), mode='automatic', plot=False, overwrite=False, nonlinear_limit=40000, dimness_limit=0.05, nearness_limit=15, edge_limit=50, targ_distance_limit=4000, nrefs=1000):
 	'''
 		PURPOSE: 
 			Does a quick plot of a Tierras image (or any 2D array)
@@ -209,16 +209,21 @@ def reference_star_chooser(file_list, mode='automatic', plot=False, overwrite=Fa
 		set_tierras_permissions(output_path)
 
 		#Figure out where the target is 
-		catra = stacked_image_header['CAT-RA']
-		catde = stacked_image_header['CAT-DEC']
-		cateq = float(stacked_image_header['CAT-EQUI'])
-		if cateq == 0:
-			raise RuntimeError('Target position is not set!')
+		if target_position[0] != 0 and target_position[1] != 0:
+			xtarg = target_position[0]
+			ytarg = target_position[1]
+		else:
+			#If no target position passed, estimate from header
+			catra = stacked_image_header['CAT-RA']
+			catde = stacked_image_header['CAT-DEC']
+			cateq = float(stacked_image_header['CAT-EQUI'])
+			if cateq == 0:
+				raise RuntimeError('Target position is not set!')
 
-		ratarg, rv = lfa.base60_to_10(catra, ":", lfa.UNIT_HR, lfa.UNIT_RAD)
-		detarg, rv = lfa.base60_to_10(catde, ":", lfa.UNIT_DEG, lfa.UNIT_RAD)
+			ratarg, rv = lfa.base60_to_10(catra, ":", lfa.UNIT_HR, lfa.UNIT_RAD)
+			detarg, rv = lfa.base60_to_10(catde, ":", lfa.UNIT_DEG, lfa.UNIT_RAD)
 
-		xtarg, ytarg = wcs.all_world2pix(ratarg * lfa.RAD_TO_DEG,detarg * lfa.RAD_TO_DEG, 1)
+			xtarg, ytarg = wcs.all_world2pix(ratarg * lfa.RAD_TO_DEG,detarg * lfa.RAD_TO_DEG, 1)
 		
 		itarg = np.argmin(np.hypot(objs_stack["x"]+1-xtarg, objs_stack["y"]+1-ytarg))
 		targ = objs_stack[[itarg]]
@@ -697,11 +702,11 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 		airmasses[i] = source_header['AIRMASS']
 		ccd_temps[i] = source_header['CCDTEMP']
 		exp_times[i] = source_header['EXPTIME']
-		dome_temps[i] = source_header['DOMETEMP']
 		focuses[i] = source_header['FOCUS']
-		dome_humidities[i] = source_header['DOMEHUMI']
 		#These keywords are sometimes missing
 		try:
+			dome_humidities[i] = source_header['DOMEHUMI']
+			dome_temps[i] = source_header['DOMETEMP']
 			sec_temps[i] = source_header['SECTEMP']
 			rod_temps[i] = source_header['RODTEMP']
 			cab_temps[i] = source_header['CABTEMP']
@@ -709,6 +714,8 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			ret_temps[i] = source_header['RETTEMP']
 			pri_temps[i] = source_header['PRITEMP']
 		except:
+			dome_humidities[i] = np.nan
+			dome_temps[i] = np.nan
 			sec_temps[i] = np.nan
 			rod_temps[i] = np.nan
 			cab_temps[i] = np.nan
@@ -1208,11 +1215,11 @@ def psf_photometry(file_list, targ_and_refs, an_in=30, an_out=50, centroid=False
 		airmasses[i] = source_header['AIRMASS']
 		ccd_temps[i] = source_header['CCDTEMP']
 		exp_times[i] = source_header['EXPTIME']
-		dome_temps[i] = source_header['DOMETEMP']
 		focuses[i] = source_header['FOCUS']
-		dome_humidities[i] = source_header['DOMEHUMI']
 		#These keywords are sometimes missing
 		try:
+			dome_humidities[i] = source_header['DOMEHUMI']
+			dome_temps[i] = source_header['DOMETEMP']
 			sec_temps[i] = source_header['SECTEMP']
 			rod_temps[i] = source_header['RODTEMP']
 			cab_temps[i] = source_header['CABTEMP']
@@ -1220,6 +1227,8 @@ def psf_photometry(file_list, targ_and_refs, an_in=30, an_out=50, centroid=False
 			ret_temps[i] = source_header['RETTEMP']
 			pri_temps[i] = source_header['PRITEMP']
 		except:
+			dome_humidities[i] = np.nan
+			dome_temps[i] = np.nan
 			sec_temps[i] = np.nan
 			rod_temps[i] = np.nan
 			cab_temps[i] = np.nan
@@ -1742,8 +1751,6 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 		#print(f"bp_rp: {targ_and_refs['bp_rp'][i+1]}")
 		fig, ax = plt.subplots(1,1,figsize=(10,5),sharex=True)
 		
-		breakpoint()
-
 		bx, by, bye = tierras_binner(times[use_inds],rel_flux,bin_mins=bin_mins)
 
 		fig.suptitle(f'Reference {i+1}',fontsize=16)
@@ -2164,7 +2171,7 @@ def main(raw_args=None):
 	ap_radii, an_in, an_out = ap_range(flattened_files, targ_and_refs)
 
 	#Do photometry
-	fixed_circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=an_in, an_out=an_out, centroid=centroid, live_plot=live_plot)
+	circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=an_in, an_out=an_out, centroid=centroid, live_plot=live_plot)
 
 	#Determine the optimal aperture size
 	optimal_lc_path = optimal_lc_chooser(date,target,ffname,plot=True,start_time=0,stop_time=0)
