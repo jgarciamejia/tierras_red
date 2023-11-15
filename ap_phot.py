@@ -304,8 +304,10 @@ def reference_star_chooser(file_list, target_position=(0,0), mode='automatic', p
 					split_ans = ans.replace(' ','').split(',')
 					refs_to_remove = np.sort([int(i) for i in split_ans])[::-1]
 					for i in refs_to_remove:
+						if i == 0:
+							print("Can't remove the target, skipping.")
+							continue
 						targ_and_refs = np.delete(targ_and_refs,i)
-					
 					plt.close()
 					
 					fig, ax = plot_image(fits.open(file_list[0])[0].data)
