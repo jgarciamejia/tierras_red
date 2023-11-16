@@ -560,7 +560,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
 
-	#file_list = file_list[-2:] #TESTING!!!
+	#file_list = file_list[-5:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
@@ -783,10 +783,16 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			#Optionally recompute the centroid
 			if centroid:
 				centroid_mask = np.zeros(cutout.shape, dtype='bool')
-				centroid_mask[0:int(an_out/2),:] = True
-				centroid_mask[:,0:int(an_out/2)] = True
-				centroid_mask[cutout.shape[0]-int(an_out/2):,:] = True
-				centroid_mask[:,cutout.shape[1]-int(an_out/2):] = True
+				# centroid_mask[0:int(an_out/2),:] = True
+				# centroid_mask[:,0:int(an_out/2)] = True
+				# centroid_mask[cutout.shape[0]-int(an_out/2):,:] = True
+				# centroid_mask[:,cutout.shape[1]-int(an_out/2):] = True
+
+				#TODO: What size should this mask be? Should we use the bad pixel mask instead? Should we just toss any stars that are remotely close to bad columns? 
+				centroid_mask[0:int(cutout.shape[1]/2)-7,:] = True
+				centroid_mask[:,0:int(cutout.shape[0]/2)-7] = True
+				centroid_mask[int(cutout.shape[0]/2)+7:,:] = True
+				centroid_mask[:,int(cutout.shape[0]/2)+7:] = True
 				x_pos_cutout_centroid, y_pos_cutout_centroid = centroid_1dg(cutout-np.median(cutout),mask=centroid_mask)
 				
 
@@ -798,7 +804,11 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 				#Update position in full image using measured centroid
 				x_pos_image = x_pos_cutout + int(x_pos_image) - an_out
 				y_pos_image = y_pos_cutout + int(y_pos_image) - an_out
+				source_x[j,i] = x_pos_image
+				source_y[j,i] = y_pos_image
 
+				# if j == 22:
+				# 	breakpoint() 
 
 			for k in range(len(ap_radii)):
 				if type == 'fixed':
@@ -1775,6 +1785,52 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 	plt.ion()
 	return
 
+def plot_raw_fluxes(lc_path):
+	#from labellines import labelLines
+
+	lc_path = Path(lc_path)
+	date = lc_path.parent.parent.parent.name
+	target = lc_path.parent.parent.name
+	ffname = lc_path.parent.name
+
+	output_path = lc_path.parent/'reference_lightcurves/'
+	if not os.path.exists(output_path):
+		os.mkdir(output_path)		
+		set_tierras_permissions(output_path)
+
+	#Clear out existing files
+	existing_files = glob(str(output_path/'*.png'))
+	for file in existing_files:
+		os.remove(file)
+
+	df = pd.read_csv(lc_path)
+	times = np.array(df['BJD TDB'])
+	x_offset = int(np.floor(times[0]))
+	times -= x_offset 
+
+	targ_flux = np.array(df['Target Source-Sky ADU'])
+
+	targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
+	n_refs = len(targ_and_refs)-1
+
+	plt.figure(figsize=(10,12))
+	plt.plot(times, targ_flux, '.', color='k', label='Target')
+	markers = ['v','s','p','*','+','x','D','|','X']
+	colors = plt.get_cmap('viridis')
+	for i in range(n_refs):
+
+		plt.plot(times, df[f'Ref {i+1} Source-Sky ADU'], marker=markers[i%len(markers)],ls='',color=colors(int(i*255/(n_refs-1))),label=f'Ref {i+1}')
+	
+	plt.yscale('log')
+	plt.legend(loc='center left', bbox_to_anchor=(1,0.5),ncol=2)
+	#labelLines(plt.gca().get_lines(), zorder=2.5, align=False)
+	plt.ylabel('Flux (ADU)',fontsize=14)
+	plt.xlabel(f'Time - {x_offset}'+' (BJD$_{TDB}$)',fontsize=14)
+	plt.tick_params(labelsize=14)
+	plt.tight_layout()
+	breakpoint()
+	breakpoint()
+
 def tierras_binner(t, y, bin_mins=15):
 	x_offset = t[0]
 	t = t - x_offset
@@ -2096,8 +2152,11 @@ def exclude_files(date, target, ffname,stdcrms_clip_threshold=6):
 	return
 
 def set_tierras_permissions(path):
-	os.chmod(path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
-	shutil.chown(path, user=None, group='exoplanet')
+	try:
+		os.chmod(path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		shutil.chown(path, user=None, group='exoplanet')
+	except:
+		print(f'Could not change permissions on {path}, returning.')
 	return 
 
 def get_lunar_distance(ra, dec, time):
