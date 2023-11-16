@@ -181,8 +181,11 @@ def reference_star_chooser(file_list, target_position=(0,0), mode='automatic', p
 		#Add some extra masking to deal with image stacking effects. 
 		
 		#Extra masking on bad columns
-		bpm[0:1032, 1441:1464] = True
-		bpm[1023:, 1788:1801]  = True
+		bpm[0:1032, 1431:1472] = True
+		bpm[1023:, 1771:1813]  = True
+
+		#Extra masking on divide between top/bottom detectors 
+		bpm[1009:1042,:] = True
 
 		#25-pixel mask on all edges
 		bpm[:, 0:25+1] = True
@@ -205,7 +208,10 @@ def reference_star_chooser(file_list, target_position=(0,0), mode='automatic', p
 		#Write all object detections out to csv file
 		df = pd.DataFrame(objs_stack)
 		output_path = reference_file_path.parent/(target+'_stacked_source_detections.csv')
-		df.to_csv(output_path, index=False)
+		try:
+			df.to_csv(output_path, index=False)
+		except:
+			print('Could not write out stacked source detections .csv, skippping!')
 		set_tierras_permissions(output_path)
 
 		#Figure out where the target is 
@@ -299,6 +305,7 @@ def reference_star_chooser(file_list, target_position=(0,0), mode='automatic', p
 				ax.text(targ_and_refs['x'][i]+5,targ_and_refs['y'][i]+5,f'R{i}',color='r',fontsize=14,)
 			
 			if mode == 'manual':
+				breakpoint()
 				ans = input('Enter IDs of reference stars to remove separated by commas (e.g. 2,4,15): ')
 				if len(ans) > 0:
 					split_ans = ans.replace(' ','').split(',')
@@ -679,8 +686,15 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 	
 	n_files = len(file_list)
 	if live_plot:
-		fig, ax = plt.subplots(2,2,figsize=(16,9))
+		#fig, ax = plt.subplots(2,2,figsize=(16,9))
 		ap_plot_ind = int(len(ap_radii)/2) #Set the central aperture as the one to plot
+		fig = plt.figure(figsize=(16,9))
+		gs = gridspec.GridSpec(2,4,figure=fig)
+		ax1 = fig.add_subplot(gs[0,0:2])
+		ax2 = fig.add_subplot(gs[1,0])
+		ax3 = fig.add_subplot(gs[1,1])
+		ax4 = fig.add_subplot(gs[0,2:])
+		ax5 = fig.add_subplot(gs[1,2:])
 
 	print(f'Doing fixed-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.\n')
 	time.sleep(2)
@@ -820,25 +834,25 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 				an = CircularAnnulus((x_pos_cutout,y_pos_cutout),r_in=an_in,r_out=an_out)
 
 
-				if j == 0 and k == ap_plot_ind and live_plot:
+				if live_plot and j == 0 and k == ap_plot_ind:
 					norm = simple_norm(cutout,'linear',min_percent=0,max_percent=99.5)
-					ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm,cmap='Greys_r')
+					ax2.imshow(cutout,origin='lower',interpolation='none',norm=norm,cmap='Greys_r')
 					#ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm)
-					ax[1,0].plot(x_pos_cutout,y_pos_cutout, color='m', marker='x',mew=1.5,ms=8)
+					ax2.plot(x_pos_cutout,y_pos_cutout, color='m', marker='x',mew=1.5,ms=8)
 					ap_circle = plt.Circle((x_pos_cutout,y_pos_cutout),ap.r,fill=False,color='m',lw=2)
 					an_in_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_in,fill=False,color='m',lw=2)
 					an_out_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_out,fill=False,color='m',lw=2)
-					ax[1,0].add_patch(ap_circle)
-					ax[1,0].add_patch(an_in_circle)
-					ax[1,0].add_patch(an_out_circle)
-					ax[1,0].set_xlim(0,cutout.shape[1])
-					ax[1,0].set_ylim(0,cutout.shape[0])
-					ax[1,0].grid(False)
-					ax[1,0].set_title('Target')
+					ax2.add_patch(ap_circle)
+					ax2.add_patch(an_in_circle)
+					ax2.add_patch(an_out_circle)
+					ax2.set_xlim(0,cutout.shape[1])
+					ax2.set_ylim(0,cutout.shape[0])
+					ax2.grid(False)
+					ax2.set_title('Target')
 
-					ax[0,0].imshow(source_data,origin='lower',interpolation='none',norm=simple_norm(source_data,'linear',min_percent=1,max_percent=99.9), cmap='Greys_r')
-					ax[0,0].grid(False)
-					ax[0,0].set_title(file_list[i].name)
+					ax1.imshow(source_data,origin='lower',interpolation='none',norm=simple_norm(source_data,'linear',min_percent=1,max_percent=99.9), cmap='Greys_r')
+					ax1.grid(False)
+					ax1.set_title(file_list[i].name)
 					for l in range(len(source_x)):
 						if l == 0:
 							color = 'm'
@@ -847,8 +861,8 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 							color = 'tab:red'
 							name = f'R{l}'
 						ap_circle = plt.Circle((source_x[l,i],source_y[l,i]),30,fill=False,color=color,lw=1)
-						ax[0,0].add_patch(ap_circle)
-						ax[0,0].text(source_x[l,i]+15,source_y[l,i]+15,name,color=color,fontsize=14)
+						ax1.add_patch(ap_circle)
+						ax1.text(source_x[l,i]+15,source_y[l,i]+15,name,color=color,fontsize=14)
 
 				if type == 'fixed':
 					source_radii[k,i] = ap_radii[k]
@@ -879,6 +893,16 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 
 				v, l, h = sigmaclip(an_data[an_data!=0],2,2)
 				bkg = np.mean(v)
+
+				if live_plot and j == 0 and k == ap_plot_ind:
+					bins = np.arange(min(an_data),max(an_data)+2.5,2.5)
+					ax3.hist(an_data[an_data!=0],bins=bins,histtype='step',lw=2,color='tab:blue',label='Full distr.')
+					ax3.hist(v,bins=bins,label='Sigma-clipped distr.')
+					ax3.axvline(bkg,color='k',lw=2)
+					ax3.set_xlabel('ADU')
+					#ax3.set_ylabel('N$_{pix}$')
+					ax3.legend()
+					ax3.set_title('Background')
 
 				source_sky_ADU[j,i] = bkg
 				source_sky_e[j,i] = bkg*GAIN
@@ -923,9 +947,9 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 					targ_norm = source_minus_sky_ADU[k,j,0:i+1]/target_renorm_factor
 					targ_norm_err = source_minus_sky_err_ADU[k,j,0:i+1]/target_renorm_factor
 					
-					ax[0,1].errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k',label='Normalized target flux')
+					ax4.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k',label='Normalized target flux')
 					#plt.ylim(380000,440000)
-					ax[0,1].set_ylabel('Normalized Flux')
+					#ax4.set_ylabel('Normalized Flux')
 		
 		#Create ensemble ALCs (summed reference fluxes with no weighting) for each source
 		for l in range(len(targ_and_refs)):
@@ -948,30 +972,31 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			alc_norm = ensemble_alc_ADU[ap_plot_ind,0,0:i+1]/alc_renorm_factor
 			alc_norm_err = ensemble_alc_err_ADU[ap_plot_ind,0,0:i+1]/alc_renorm_factor
 			v,l,h=sigmaclip(alc_norm[~np.isnan(alc_norm)])
-			ax[0,1].errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ALC flux')
+			ax4.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ALC flux')
 			try:
-				ax[0,1].set_ylim(l,h)
+				ax4.set_ylim(l,h)
 			except:
 				breakpoint()
-			ax[0,1].legend() 
+			ax4.legend() 
 
 			corrected_flux = targ_norm/alc_norm
 			corrected_flux_err = np.sqrt((targ_norm_err/alc_norm)**2+(targ_norm*alc_norm_err/(alc_norm**2))**2)
 			v,l,h=sigmaclip(corrected_flux)
-			ax[1,1].errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Corrected target flux')
-			ax[1,1].set_ylim(l,h)
-			ax[1,1].legend()
-			ax[1,1].set_ylabel('Normalized Flux')
-			ax[1,1].set_xlabel(f'Time - {int(bjd_tdb[0]):d}'+' (BJD$_{TDB}$)')
+			ax5.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Corrected target flux')
+			ax5.set_ylim(l,h)
+			ax5.legend()
+			#ax5.set_ylabel('Normalized Flux')
+			ax5.set_xlabel(f'Time - {int(bjd_tdb[0]):d}'+' (BJD$_{TDB}$)')
 			#plt.tight_layout()
 			plt.suptitle(f'{i+1} of {n_files}')
 			#plt.savefig(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/live_plots/{str(i+1).zfill(4)}.jpg',dpi=100)
 			#breakpoint()
 			plt.pause(0.01)
-			ax[0,0].cla()
-			ax[1,0].cla()
-			ax[0,1].cla()
-			ax[1,1].cla()
+			ax1.cla()
+			ax2.cla()
+			ax3.cla()
+			ax4.cla()
+			ax5.cla()
 
 	#Write out photometry. 
 	for i in range(len(ap_radii)):
