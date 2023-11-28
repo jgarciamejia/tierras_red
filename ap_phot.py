@@ -305,7 +305,6 @@ def reference_star_chooser(file_list, target_position=(0,0), mode='automatic', p
 				ax.text(targ_and_refs['x'][i]+5,targ_and_refs['y'][i]+5,f'R{i}',color='r',fontsize=14,)
 			
 			if mode == 'manual':
-				breakpoint()
 				ans = input('Enter IDs of reference stars to remove separated by commas (e.g. 2,4,15): ')
 				if len(ans) > 0:
 					split_ans = ans.replace(' ','').split(',')
@@ -594,6 +593,12 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			smoothed_fwhm_arcsec = savgol_filter(mean_fwhm, 11, 3)
 			smoothed_fwhm_pix = smoothed_fwhm_arcsec/PLATE_SCALE
 
+			plt.plot(mean_fwhm,label='Mean FWHM')
+			plt.plot(smoothed_fwhm_arcsec,label='Smoothed FWHM')
+			plt.ylabel('FWHM (")')
+			plt.legend()
+			breakpoint()
+
 	#Set up arrays for doing photometry 
 
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH FILE
@@ -617,7 +622,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 	humidities = np.zeros(len(file_list),dtype='float16')
 	dewpoints = np.zeros(len(file_list),dtype='float16')
 	sky_temps = np.zeros(len(file_list),dtype='float16')
-	lunar_distance = np.zeros(len(file_list),dtype='float16')
+	#lunar_distance = np.zeros(len(file_list),dtype='float16')
 	
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH SOURCE IN EACH FILE
 	source_x = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
@@ -744,7 +749,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 		dewpoints[i] = source_header['DEWPOINT']
 		sky_temps[i] = source_header['SKYTEMP']
 
-		lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i])
+		#lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary
 
 		#UPDATE SOURCE POSITIONS
 		#METHOD 1: WCS
@@ -903,6 +908,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 					#ax3.set_ylabel('N$_{pix}$')
 					ax3.legend()
 					ax3.set_title('Background')
+					ax3.set_xscale('log')
 
 				source_sky_ADU[j,i] = bkg
 				source_sky_e[j,i] = bkg*GAIN
@@ -1054,8 +1060,8 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 		output_header.append('Dewpoint')
 		output_list.append([f'{val:.1f}' for val in sky_temps])
 		output_header.append('Sky Temperature')
-		output_list.append([f'{val:.5f}' for val in lunar_distance])
-		output_header.append('Lunar Distance')
+		#output_list.append([f'{val:.5f}' for val in lunar_distance])
+		#output_header.append('Lunar Distance')
 
 		for j in range(len(targ_and_refs)):
 			if j == 0:
@@ -1162,7 +1168,7 @@ def psf_photometry(file_list, targ_and_refs, an_in=30, an_out=50, centroid=False
 	humidities = np.zeros(len(file_list),dtype='float16')
 	dewpoints = np.zeros(len(file_list),dtype='float16')
 	sky_temps = np.zeros(len(file_list),dtype='float16')
-	lunar_distance = np.zeros(len(file_list),dtype='float16')
+	#lunar_distance = np.zeros(len(file_list),dtype='float16')
 	
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH SOURCE IN EACH FILE
 	source_x = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
@@ -1278,7 +1284,7 @@ def psf_photometry(file_list, targ_and_refs, an_in=30, an_out=50, centroid=False
 		dewpoints[i] = source_header['DEWPOINT']
 		sky_temps[i] = source_header['SKYTEMP']
 
-		lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i])
+		#lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i])
 
 		#UPDATE SOURCE POSITIONS
 		#METHOD 1: WCS
@@ -1518,7 +1524,7 @@ def psf_photometry(file_list, targ_and_refs, an_in=30, an_out=50, centroid=False
 			ax4.cla()
 			ax5.cla()
 
-def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
+def plot_target_summary(file_path,pval_threshold=0.01,bin_mins=15):
 	date = file_path.parent.parent.parent.name
 	target = file_path.parent.parent.name
 	ffname = file_path.parent.name 
@@ -1530,8 +1536,13 @@ def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
 
 	targ_flux = np.array(df['Target Source-Sky ADU'])
 	targ_flux_err = np.array(df['Target Source-Sky Error ADU'])
-	alc_flux = np.array(df['Target Ensemble ALC ADU'])
-	alc_flux_err = np.array(df['Target Ensemble ALC Error ADU'])
+
+	#NEW: generate ALC using reference star weights
+	alc_flux, alc_flux_err = weighted_alc(file_path)
+
+	# #OLD: use ensemble ALC from light curve file
+	# alc_flux = np.array(df['Target Ensemble ALC ADU'])
+	# alc_flux_err = np.array(df['Target Ensemble ALC Error ADU'])
 
 	#Set up dictionary containing ancillary data to check for significant correlations
 	ancillary_dict = {}
@@ -1615,7 +1626,7 @@ def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
 	ax1.tick_params(labelbottom=False)
 
 	ax2.plot(times, corrected_targ_flux, marker='.',color='#b0b0b0',ls='',label='Rel. targ. flux')
-	bin_mins=15
+	#bin_mins=15
 	bx, by, bye = tierras_binner(times, corrected_targ_flux, bin_mins=bin_mins)
 	ax2.errorbar(bx,by,bye,marker='o',mfc='none',mec='k',mew=1.5,ecolor='k',ms=7,ls='',zorder=3,label=f'{bin_mins:d}-min bins')
 	ax2.legend(loc='center left', bbox_to_anchor=(1,0.5),fontsize=10)
@@ -1673,63 +1684,63 @@ def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
 	plt.savefig(summary_plot_output_path,dpi=300)
 	set_tierras_permissions(summary_plot_output_path)
 
-	if regression:
-		regr = linear_model.LinearRegression()
-		regress_dict = {}
+	# if regression:
+	# 	regr = linear_model.LinearRegression()
+	# 	regress_dict = {}
 		
-		#Check for significant correlations between ancillary data and corrected target flux
-		for key in ancillary_dict:
-			try:
-				corr, pvalue = pearsonr(corrected_targ_flux,ancillary_dict[key])
-			except:
-				continue
-			if pvalue < pval_threshold:
-				regress_dict[key] = ancillary_dict[key]
-				print(f'{key}, corr:{corr:.2f}, P-value: {pvalue:.2E}')
+	# 	#Check for significant correlations between ancillary data and corrected target flux
+	# 	for key in ancillary_dict:
+	# 		try:
+	# 			corr, pvalue = pearsonr(corrected_targ_flux,ancillary_dict[key])
+	# 		except:
+	# 			continue
+	# 		if pvalue < pval_threshold:
+	# 			regress_dict[key] = ancillary_dict[key]
+	# 			print(f'{key}, corr:{corr:.2f}, P-value: {pvalue:.2E}')
 		  
-		regress_dict['flux'] = corrected_targ_flux
-		keylist = list(regress_dict.keys())
+	# 	regress_dict['flux'] = corrected_targ_flux
+	# 	keylist = list(regress_dict.keys())
 		
-		regress_df = pd.DataFrame(regress_dict, columns=list(regress_dict.keys()))
-		x = regress_df[keylist[0:len(keylist)-1]]
-		y = regress_df['flux']
-		regr.fit(x,y)
-		regression_model = regr.intercept_
+	# 	regress_df = pd.DataFrame(regress_dict, columns=list(regress_dict.keys()))
+	# 	x = regress_df[keylist[0:len(keylist)-1]]
+	# 	y = regress_df['flux']
+	# 	regr.fit(x,y)
+	# 	regression_model = regr.intercept_
 
-		# planet_model_ind = np.where(np.array(keylist) == 'Planet Model')[0][0]
-		# regr.coef_[planet_model_ind] = 1 #FORCE this to be 1
-		for i in range(len(keylist[:-1])):
-			print(f'{regr.coef_[i]:.4E}*{keylist[i]}')
-			regression_model += regr.coef_[i]*regress_dict[keylist[i]]
+	# 	# planet_model_ind = np.where(np.array(keylist) == 'Planet Model')[0][0]
+	# 	# regr.coef_[planet_model_ind] = 1 #FORCE this to be 1
+	# 	for i in range(len(keylist[:-1])):
+	# 		print(f'{regr.coef_[i]:.4E}*{keylist[i]}')
+	# 		regression_model += regr.coef_[i]*regress_dict[keylist[i]]
 
-		ax[1].plot(times, regression_model, lw=2, zorder=4, label='Linear regression model')
-		ax[1].legend()
+	# 	ax[1].plot(times, regression_model, lw=2, zorder=4, label='Linear regression model')
+	# 	ax[1].legend()
 
-		plt.figure()
-		regressed_flux = corrected_targ_flux/regression_model
-		regressed_flux /= np.mean(regressed_flux)	
-		# coeffs = np.polyfit(times[np.where(times>0.72)[0]],regressed_flux[np.where(times>0.72)[0]],1)
-		# fit = times*coeffs[0]+coeffs[1]
-		# regressed_flux /= fit
+	# 	plt.figure()
+	# 	regressed_flux = corrected_targ_flux/regression_model
+	# 	regressed_flux /= np.mean(regressed_flux)	
+	# 	# coeffs = np.polyfit(times[np.where(times>0.72)[0]],regressed_flux[np.where(times>0.72)[0]],1)
+	# 	# fit = times*coeffs[0]+coeffs[1]
+	# 	# regressed_flux /= fit
 
 
-		points_to_bin = 20
-		n_bins = int(np.ceil(len(times)/points_to_bin))
-		bx = np.zeros(n_bins)
-		by = np.zeros(n_bins)
-		bye = np.zeros(n_bins)
-		for i in range(n_bins):
-			if i == n_bins-1:
-				bin_inds = np.arange(i*points_to_bin,len(times))
-			else:
-				bin_inds = np.arange(i*points_to_bin,(i+1)*points_to_bin)
-			bx[i] = np.mean(times[bin_inds])
-			by[i] = np.mean(regressed_flux[bin_inds])
-			bye[i] = np.std(regressed_flux[bin_inds])/np.sqrt(len(bin_inds))
-		plt.plot(times, regressed_flux, marker='.',color='#b0b0b0',ls='')
-		#plt.plot(times, regressed_flux+regr.coef_[-1]*ancillary_dict['Planet Model'], marker='.',color='k',ls='')
-		#plt.plot(times, planet_model, lw=2)
-		plt.errorbar(bx, by, bye, marker='o', color='none', mec='k', ecolor='k', mew=2, ls='', zorder=3)
+	# 	points_to_bin = 20
+	# 	n_bins = int(np.ceil(len(times)/points_to_bin))
+	# 	bx = np.zeros(n_bins)
+	# 	by = np.zeros(n_bins)
+	# 	bye = np.zeros(n_bins)
+	# 	for i in range(n_bins):
+	# 		if i == n_bins-1:
+	# 			bin_inds = np.arange(i*points_to_bin,len(times))
+	# 		else:
+	# 			bin_inds = np.arange(i*points_to_bin,(i+1)*points_to_bin)
+	# 		bx[i] = np.mean(times[bin_inds])
+	# 		by[i] = np.mean(regressed_flux[bin_inds])
+	# 		bye[i] = np.std(regressed_flux[bin_inds])/np.sqrt(len(bin_inds))
+	# 	plt.plot(times, regressed_flux, marker='.',color='#b0b0b0',ls='')
+	# 	#plt.plot(times, regressed_flux+regr.coef_[-1]*ancillary_dict['Planet Model'], marker='.',color='k',ls='')
+	# 	#plt.plot(times, planet_model, lw=2)
+	# 	plt.errorbar(bx, by, bye, marker='o', color='none', mec='k', ecolor='k', mew=2, ls='', zorder=3)
 
 
 	# plt.figure()
@@ -1746,10 +1757,96 @@ def plot_target_lightcurve(file_path,regression=False,pval_threshold=0.01):
 	plt.close('all')
 	return
 
+def plot_target_lightcurve(lc_path,bin_mins=15):
+	plt.ion()
+	lc_path = Path(lc_path)
+	ffname = lc_path.parent.name
+	target = lc_path.parent.parent.name
+	date = lc_path.parent.parent.parent.name
+
+	df = pd.read_csv(lc_path)
+	# targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
+	# n_refs = len(targ_and_refs)
+
+
+	times = np.array(df['BJD TDB'])
+	targ_flux = np.array(df['Target Source-Sky ADU'])
+	targ_flux_err = np.array(df['Target Source-Sky Error ADU'])
+	
+	# NEW: Use weighted ALC
+	alc_flux, alc_flux_err = weighted_alc(lc_path)
+	rel_flux = targ_flux / alc_flux 
+	rel_flux_err = np.sqrt((targ_flux_err/alc_flux)**2+(targ_flux*alc_flux_err/(alc_flux**2))**2)
+
+	# #OLD:Use ALC ensemble flux
+	# alc_flux = np.array(df['Target Ensemble ALC ADU'])
+	# alc_flux_err = np.array(df['Target Ensemble ALC Error ADU'])
+	#rel_flux = np.array(df['Target Relative Flux'])
+	#rel_flux_err = np.array(df['Target Relative Flux Error'])
+	
+	#Sigma clip
+	v, l, h = sigmaclip(rel_flux)
+	use_inds = np.where((rel_flux>l)&(rel_flux<h))[0]
+	targ_flux = targ_flux[use_inds]
+	targ_flux_err = targ_flux_err[use_inds]
+	alc_flux = alc_flux[use_inds]
+	alc_flux_err = alc_flux_err[use_inds]
+	rel_flux = rel_flux[use_inds]
+	rel_flux_err = rel_flux_err[use_inds]
+
+	renorm = np.nanmean(rel_flux)
+	rel_flux /= renorm
+	rel_flux_err /= renorm
+
+	renorm = np.nanmean(targ_flux)
+	targ_flux /= renorm
+	targ_flux_err /= renorm 
+
+	renorm = np.nanmean(alc_flux)
+	alc_flux /= renorm 
+	alc_flux_err /= renorm
+
+	#print(f"bp_rp: {targ_and_refs['bp_rp'][i+1]}")
+	fig, ax = plt.subplots(2,1,figsize=(10,10),sharex=True)
+	
+	bx, by, bye = tierras_binner(times[use_inds],rel_flux,bin_mins=bin_mins)
+
+	fig.suptitle(f'{target}',fontsize=16)
+	ax[0].errorbar(times[use_inds], targ_flux, targ_flux_err, color='k',ecolor='k',marker='.',ls='',zorder=3,label='Target')
+	ax[0].errorbar(times[use_inds], alc_flux, alc_flux_err, color='r', ecolor='r', marker='.',ls='',zorder=3,label='ALC')
+	ax[0].set_ylabel('Normalized Flux', fontsize=16)
+	ax[0].tick_params(labelsize=14)
+	ax[0].grid(True, alpha=0.8)
+	ax[0].legend()
+
+	ax[1].plot(times[use_inds], rel_flux,  marker='.', ls='', color='#b0b0b0')
+	ax[1].errorbar(bx,by,bye,marker='o',color='none',ecolor='k',mec='k',mew=2,ms=5,ls='',label=f'{bin_mins}-min binned photometry',zorder=3)
+	ax[1].tick_params(labelsize=14)
+	ax[1].set_xlabel('Time (BJD$_{TDB}$)',fontsize=16)
+	ax[1].set_ylabel('Normalized Flux',fontsize=16)
+	ax[1].grid(True, alpha=0.8)
+	ax[1].legend()
+	
+	model_times = np.arange(min(times[use_inds]),max(times[use_inds]),0.0005)
+	planet_flux = transit_model(model_times, 2459497.184957, 25.522952715243/2, np.sqrt(1179.7/1e6), 84.4, 90, 0, 90, 0.1, 0.3)
+	ax[1].plot(model_times, planet_flux)
+
+	plt.tight_layout()
+	plt.subplots_adjust(hspace=0.04)
+	output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{date}_{target}_lc.png'
+	plt.savefig(output_path,dpi=300)
+	set_tierras_permissions(output_path)
+
+	plt.close()
+	return
+
 def plot_ref_lightcurves(lc_path, bin_mins=15):
 	plt.ioff()
 	lc_path = Path(lc_path)
-	target = lc_path.parent.parent.name
+	parents = lc_path.parents
+	ffname = parents[0].name
+	target = parents[1].name
+	date = parents[2].name
 	output_path = lc_path.parent/'reference_lightcurves/'
 	if not os.path.exists(output_path):
 		os.mkdir(output_path)		
@@ -1761,8 +1858,10 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 		os.remove(file)
 
 	df = pd.read_csv(lc_path)
-	targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
-	n_refs = len(targ_and_refs)-1
+	# targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
+	# n_refs = len(targ_and_refs)-1
+
+	n_refs = int(df.keys()[-1].split('Ref ')[1].split(' ')[0])
 
 	if n_refs == 1:
 		print('Only 1 reference, cannot create reference ALC.')
@@ -1770,10 +1869,33 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 
 	times = np.array(df['BJD TDB'])
 
+	weight_df = pd.read_csv(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/night_weights.csv')
+	weights = np.array(weight_df['Weight'])
+
+	n_ims = len(df)
+	ref_fluxes = np.zeros((n_ims, n_refs))
+	ref_flux_errs = np.zeros((n_ims, n_refs))
+	for i in range(n_refs):
+		ref_fluxes[:,i] = np.array(df[f'Ref {i+1} Source-Sky ADU'])
+		ref_flux_errs[:,i] = np.array(df[f'Ref {i+1} Source-Sky Error ADU'])
+
 	for i in range(n_refs):
 		print(f'Doing Ref {i+1} of {n_refs}')
-		rel_flux = np.array(df[f'Ref {i+1} Relative Flux'])
-		rel_flux_err = np.array(df[f'Ref {i+1} Relative Flux Error'])
+		inds = np.array([j for j in range(n_refs) if j != i])
+
+		#NEW: Calculate ALC using weights (excluding the weight of this particular ref star)
+		weights_use = weights[inds] 
+		weights_use /= sum(weights_use)
+
+		alc = np.sum(weights_use*ref_fluxes[:,inds],axis=1)
+		alc_err = np.sqrt(np.sum((weights_use*ref_flux_errs[:,inds])**2,axis=1))
+
+		rel_flux = ref_fluxes[:,i]/alc
+		rel_flux_err = np.sqrt((ref_flux_errs[:,i]/alc)**2+(ref_fluxes[:,i]*alc_err/(alc**2))**2)
+
+		# #OLD: Use relative flux as calculated using ensemble ALC
+		# rel_flux = np.array(df[f'Ref {i+1} Relative Flux'])
+		# rel_flux_err = np.array(df[f'Ref {i+1} Relative Flux Error'])
 		
 		#Sigma clip
 		v, l, h = sigmaclip(rel_flux)
@@ -1790,7 +1912,7 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 		
 		bx, by, bye = tierras_binner(times[use_inds],rel_flux,bin_mins=bin_mins)
 
-		fig.suptitle(f'Reference {i+1}',fontsize=16)
+		fig.suptitle(f'Reference {i+1}, Weight={weights[i]:.2g}',fontsize=16)
 
 		ax.plot(times[use_inds], rel_flux,  marker='.', ls='', color='#b0b0b0')
 		ax.errorbar(bx,by,bye,marker='o',color='none',ecolor='k',mec='k',mew=2,ms=5,ls='',label=f'{bin_mins}-min binned photometry',zorder=3)
@@ -1802,7 +1924,6 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 		ax.legend()
 		
 		plt.tight_layout()
-
 		plt.savefig(output_path/f'ref_{i+1}.png',dpi=300)
 		set_tierras_permissions(output_path/f'ref_{i+1}.png')
 
@@ -1811,22 +1932,10 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 	return
 
 def plot_raw_fluxes(lc_path):
-	#from labellines import labelLines
-
 	lc_path = Path(lc_path)
-	date = lc_path.parent.parent.parent.name
-	target = lc_path.parent.parent.name
 	ffname = lc_path.parent.name
-
-	output_path = lc_path.parent/'reference_lightcurves/'
-	if not os.path.exists(output_path):
-		os.mkdir(output_path)		
-		set_tierras_permissions(output_path)
-
-	#Clear out existing files
-	existing_files = glob(str(output_path/'*.png'))
-	for file in existing_files:
-		os.remove(file)
+	target = lc_path.parent.parent.name
+	date = lc_path.parent.parent.parent.name
 
 	df = pd.read_csv(lc_path)
 	times = np.array(df['BJD TDB'])
@@ -1834,27 +1943,44 @@ def plot_raw_fluxes(lc_path):
 	times -= x_offset 
 
 	targ_flux = np.array(df['Target Source-Sky ADU'])
+	#targ_flux /= np.median(targ_flux)
 
-	targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
-	n_refs = len(targ_and_refs)-1
+	n_refs = int(df.keys()[-1].split('Ref ')[1].split(' ')[0])
 
 	plt.figure(figsize=(10,12))
-	plt.plot(times, targ_flux, '.', color='k', label='Target')
-	markers = ['v','s','p','*','+','x','D','|','X']
-	colors = plt.get_cmap('viridis')
-	for i in range(n_refs):
+	plt.plot(times, targ_flux, '.', color='k', label='Targ.')
+	plt.text(times[0]-(times[-1]-times[0])/75,targ_flux[0],'Targ.',color='k',ha='right',va='center',fontsize=12)
 
-		plt.plot(times, df[f'Ref {i+1} Source-Sky ADU'], marker=markers[i%len(markers)],ls='',color=colors(int(i*255/(n_refs-1))),label=f'Ref {i+1}')
-	
+	xvals = np.zeros(n_refs+1) + times[0] - (times[-1]-times[0])/200
+	#xvals[0] = times[0]
+	#markers = ['v','s','p','*','+','x','D','|','X']
+	markers = ['.']
+	#colors = plt.get_cmap('viridis_r')
+	#offset = 0.125
+	colors = ['tab:blue','tab:orange','tab:green','tab:red','tab:purple','tab:brown','tab:pink','tab:grey','tab:olive','tab:cyan']
+	for i in range(n_refs):
+		ref_flux = np.array(df[f'Ref {i+1} Source-Sky ADU'])
+		#ref_flux /= np.median(ref_flux)
+		plt.plot(times, ref_flux, marker=markers[i%len(markers)],ls='',label=f'{i+1}',color=colors[i%len(colors)])
+		if i % 2 == 0:
+			plt.text(times[0]-(times[-1]-times[0])/25,ref_flux[0],f'{i+1}',color=colors[i%len(colors)],ha='right',va='center',fontsize=12)
+		else:
+			plt.text(times[0]-(times[-1]-times[0])/100,ref_flux[0],f'{i+1}',color=colors[i%len(colors)],ha='right',va='center',fontsize=12)
+	#breakpoint()
 	plt.yscale('log')
-	plt.legend(loc='center left', bbox_to_anchor=(1,0.5),ncol=2)
-	#labelLines(plt.gca().get_lines(), zorder=2.5, align=False)
+	#plt.legend(loc='center left', bbox_to_anchor=(1,0.5),ncol=2)
+	plt.xlim(times[0]-(times[-1]-times[0])/15,times[-1]+(times[-1]-times[0])/100)
+
 	plt.ylabel('Flux (ADU)',fontsize=14)
 	plt.xlabel(f'Time - {x_offset}'+' (BJD$_{TDB}$)',fontsize=14)
 	plt.tick_params(labelsize=14)
 	plt.tight_layout()
-	breakpoint()
-	breakpoint()
+
+	output_path = lc_path.parent/f'{date}_{target}_raw_flux.png'
+	plt.savefig(output_path,dpi=300)
+	set_tierras_permissions(output_path)
+
+	return 
 
 def tierras_binner(t, y, bin_mins=15):
 	x_offset = t[0]
@@ -1955,86 +2081,112 @@ def transit_model(times, T0,P,Rp,a,inc,ecc,w,u1,u2):
 def moving_average(x, w):
     return np.convolve(x, np.ones(w), 'same') / w
 
-def optimal_lc_chooser(date, target, ffname, start_time=0, stop_time=0, plot=False):
-	lc_list = np.array(glob(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/*phot*.csv'))
-	sort_inds = np.argsort([float(i.split('/')[-1].split('_')[-1].split('.csv')[0]) for i in lc_list])
-	lc_list = lc_list[sort_inds]
-	if plot:
-		fig, ax = plt.subplots(len(lc_list),1,figsize=(10,1.25*len(lc_list)),sharex=True,sharey=True)
-	
-	best_stddev = 9999.
-	for i in range(len(lc_list)):
-		type = lc_list[i].split('/')[-1].split('_')[1]+' '+lc_list[i].split('/')[-1].split('_')[-1].split('.csv')[0]
-		df = pd.read_csv(lc_list[i])
-		times = np.array(df['BJD TDB'])
-		rel_targ_flux = np.array(df['Target Relative Flux'])
-		rel_targ_flux_err = np.array(df['Target Relative Flux Error'])
-		
-		#Trim any NaNs
-		use_inds = ~np.isnan(rel_targ_flux)
-		times = times[use_inds]
-		rel_targ_flux = rel_targ_flux[use_inds]
-		rel_targ_flux_err = rel_targ_flux_err[use_inds] 
-		
-		#Sigmaclip
-		v,l,h = sigmaclip(rel_targ_flux)
-		use_inds = np.where((rel_targ_flux>l)&(rel_targ_flux<h))[0]
-		times = times[use_inds]
-		rel_targ_flux = rel_targ_flux[use_inds]
-		rel_targ_flux_err = rel_targ_flux_err[use_inds]
-		
-		norm = np.mean(rel_targ_flux)
-		rel_targ_flux /= norm 
-		rel_targ_flux_err /= norm
-		
-		#Allow user to specify start/stop times over which to evaluate light curve (i.e., to ignore transits)
-		if (start_time != 0) and (stop_time != 0):
-			eval_inds = np.where((times>=start_time)&(times<=stop_time))[0]
-		else:
-			eval_inds = np.arange(len(times))
-		
+def optimal_lc_chooser(date, target, ffname, overwrite=False, start_time=0, stop_time=0, plot=False):
+	optimum_lc_file = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt'
+	weight_file = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/night_weights.csv'
 
-		times_eval = times[eval_inds]
-		flux_eval = rel_targ_flux[eval_inds]
-		
-		#Option 1: Evaluate the median standard deviation over 5-minute intervals 
-		bin_inds = tierras_binner_inds(times_eval, bin_mins=5)
-		stddevs = np.zeros(len(bin_inds))
-		for j in range(len(bin_inds)):
-			stddevs[j] = np.nanstd(flux_eval[bin_inds[j]])
-		med_stddev = np.nanmedian(stddevs)
-
-		# #Option 2: just evaluate stddev
-		# med_stddev = np.std(flux_eval)
-
-		#moving_avg = moving_average(rel_targ_flux,int(len(times)/50))
+	if (os.path.exists(optimum_lc_file)) and (os.path.exists(weight_file)) and not overwrite:
+		with open(optimum_lc_file) as f:
+			best_lc_path = f.readline()
+	else:
+		lc_list = np.array(glob(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/*phot*.csv'))
+		sort_inds = np.argsort([float(i.split('/')[-1].split('_')[-1].split('.csv')[0]) for i in lc_list])
+		lc_list = lc_list[sort_inds]
 		if plot:
-			ax[i].errorbar(times, rel_targ_flux, rel_targ_flux_err, marker='.',color='#b0b0b0',ls='')
-			#ax[i].plot(times, moving_avg,color='tab:orange',lw=2,zorder=3)
-			ax2 = ax[i].twinx()
-			ax2.set_ylabel(lc_list[i].split('_')[-1].split('.csv')[0],rotation=270,labelpad=12)
-			ax2.set_yticks([])
-		#stddev = np.std(rel_targ_flux)
-		print(f'{type} median 5-min stddev: {med_stddev*1e6:.1f} ppm')
-		if med_stddev < best_stddev:
-			best_ind = i
-			best_lc_path = lc_list[i]
-			best_stddev = med_stddev
-	
-	if plot:
-		ax[-1].set_xlabel('Time (BJD$_{TDB}$)')
-		plt.tight_layout()
-		optimized_lc_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{target}_{date}_optimized_lc_.png'
-		plt.savefig(optimized_lc_path,dpi=300)
-		set_tierras_permissions(optimized_lc_path)
-	
-	with open (f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt','w') as f:
-		f.write(best_lc_path)
-	set_tierras_permissions(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt')
-	
+			fig, ax = plt.subplots(len(lc_list),1,figsize=(10,1.25*len(lc_list)),sharex=True,sharey=True)
+		
+		best_stddev = 9999.
+		for i in range(len(lc_list)):
+			type = lc_list[i].split('/')[-1].split('_')[1]+' '+lc_list[i].split('/')[-1].split('_')[-1].split('.csv')[0]
+			df = pd.read_csv(lc_list[i])
+			times = np.array(df['BJD TDB'])
+
+			#NEW: Use Tierras weighting to create the ALC and generate relative target flux
+			weights, alc, alc_err = tierras_ref_weighting(df)
+			targ_flux = np.array(df['Target Source-Sky ADU'])
+			targ_flux_err = np.array(df['Target Source-Sky Error ADU'])
+			rel_targ_flux = targ_flux / alc 
+			rel_targ_flux_err = np.sqrt((targ_flux_err/alc)**2+(targ_flux*alc_err/(alc**2))**2)
+
+			# #OLD: Use relative target flux calculated using ensemble ALC
+			# rel_targ_flux = np.array(df['Target Relative Flux'])
+			# rel_targ_flux_err = np.array(df['Target Relative Flux Error'])
+			
+			#Trim any NaNs
+			use_inds = ~np.isnan(rel_targ_flux)
+			times = times[use_inds]
+			rel_targ_flux = rel_targ_flux[use_inds]
+			rel_targ_flux_err = rel_targ_flux_err[use_inds] 
+			
+			#Sigmaclip
+			v,l,h = sigmaclip(rel_targ_flux)
+			use_inds = np.where((rel_targ_flux>l)&(rel_targ_flux<h))[0]
+			times = times[use_inds]
+			rel_targ_flux = rel_targ_flux[use_inds]
+			rel_targ_flux_err = rel_targ_flux_err[use_inds]
+			
+			norm = np.mean(rel_targ_flux)
+			rel_targ_flux /= norm 
+			rel_targ_flux_err /= norm
+			
+			#Allow user to specify start/stop times over which to evaluate light curve (i.e., to ignore transits)
+			if (start_time != 0) and (stop_time != 0):
+				eval_inds = np.where((times>=start_time)&(times<=stop_time))[0]
+			else:
+				eval_inds = np.arange(len(times))
+			
+
+			times_eval = times[eval_inds]
+			flux_eval = rel_targ_flux[eval_inds]
+			
+			#Option 1: Evaluate the median standard deviation over 5-minute intervals 
+			bin_inds = tierras_binner_inds(times_eval, bin_mins=5)
+			stddevs = np.zeros(len(bin_inds))
+			for j in range(len(bin_inds)):
+				stddevs[j] = np.nanstd(flux_eval[bin_inds[j]])
+			med_stddev = np.nanmedian(stddevs)
+
+			# #Option 2: just evaluate stddev
+			# med_stddev = np.std(flux_eval)
+
+			#moving_avg = moving_average(rel_targ_flux,int(len(times)/50))
+			if plot:
+				ax[i].errorbar(times, rel_targ_flux, rel_targ_flux_err, marker='.',color='#b0b0b0',ls='')
+				#ax[i].plot(times, moving_avg,color='tab:orange',lw=2,zorder=3)
+				ax2 = ax[i].twinx()
+				ax2.set_ylabel(lc_list[i].split('_')[-1].split('.csv')[0],rotation=270,labelpad=12)
+				ax2.set_yticks([])
+			#stddev = np.std(rel_targ_flux)
+			print(f'{type} median 5-min stddev: {med_stddev*1e6:.1f} ppm')
+			if med_stddev < best_stddev:
+				best_ind = i
+				best_lc_path = lc_list[i]
+				best_stddev = med_stddev
+				weights_save = weights
+		
+		if plot:
+			ax[-1].set_xlabel('Time (BJD$_{TDB}$)')
+			plt.tight_layout()
+			optimized_lc_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{date}_{target}_optimized_lc_.png'
+			plt.savefig(optimized_lc_path,dpi=300)
+			set_tierras_permissions(optimized_lc_path)
+		
+		#Write out the path of the optimum light curve file
+		with open (f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt','w') as f:
+			f.write(best_lc_path)
+		set_tierras_permissions(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt')
+		
+		#Save a .csv of the reference weights for the optimum light curve
+		ref_labels = [f'Ref {i+1}' for i in range(len(weights_save))]
+		weight_strs = [f'{val:.7f}' for val in weights_save]
+		weight_df = pd.DataFrame({'Reference':ref_labels,'Weight':weight_strs})
+		output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/night_weights.csv'
+		weight_df.to_csv(output_path,index=0)
+		set_tierras_permissions(output_path)
+
 	return Path(best_lc_path)
 
-def ap_range(file_list, targ_and_refs, overwrite=False):
+def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 	'''Measures the average FWHM of the target across a set of images to determine a range of apertures for performing photometry.
 	'''
 	ffname = file_list[0].parent.name
@@ -2064,6 +2216,15 @@ def ap_range(file_list, targ_and_refs, overwrite=False):
 
 		fwhm_x = np.zeros(len(file_list))
 		fwhm_y = np.zeros(len(file_list))
+		
+		if plots:
+			fig = plt.figure(figsize=(10,7))
+			gs = gridspec.GridSpec(2,3)
+			ax1 = fig.add_subplot(gs[0,0])
+			ax2 = fig.add_subplot(gs[0,1])
+			ax3 = fig.add_subplot(gs[0,2])
+			ax4 = fig.add_subplot(gs[1,:])
+
 		for i in range(len(file_list)):
 			hdu = fits.open(file_list[i])[0]
 			header = hdu.header
@@ -2092,6 +2253,7 @@ def ap_range(file_list, targ_and_refs, overwrite=False):
 			#Fit a 2D gaussian to the cutout
 			xx,yy = np.meshgrid(np.arange(cutout.shape[1]),np.arange(cutout.shape[0]))
 			g_init = models.Gaussian2D(amplitude=cutout[int(cutout.shape[1]/2), int(cutout.shape[0]/2)]-np.median(cutout),x_mean=cutout.shape[1]/2,y_mean=cutout.shape[0]/2, x_stddev=5, y_stddev=5)
+			#g_init.theta.bounds = (0,np.pi)
 			fit_g = fitting.LevMarLSQFitter()
 			g = fit_g(g_init,xx,yy,cutout-np.median(cutout))
 			
@@ -2105,6 +2267,48 @@ def ap_range(file_list, targ_and_refs, overwrite=False):
 			fwhm_x[i] = x_fwhm_arcsec
 			fwhm_y[i] = y_fwhm_arcsec
 			print(f'{i+1} of {len(file_list)}')
+
+			if plots:
+				norm = simple_norm(cutout, 'linear', min_percent=1, max_percent=95)
+				im1 = ax1.imshow(cutout,origin='lower',interpolation='none', norm=norm)
+				divider = make_axes_locatable(ax1)
+				cax = divider.append_axes('right',size='5%',pad=0.05)
+				cb1 = fig.colorbar(im1, cax=cax, orientation='vertical')
+				ax1.set_title('Target Cutout')
+
+				im2 = ax2.imshow(g(xx,yy),origin='lower',interpolation='none', norm=norm)			
+				divider = make_axes_locatable(ax2)
+				cax = divider.append_axes('right',size='5%',pad=0.05)
+				cb2 = fig.colorbar(im2, cax=cax, orientation='vertical')
+				ax2.set_title('2D Gaussian Model')
+
+				im3 = ax3.imshow(cutout-g(xx,yy),origin='lower',interpolation='none')
+				divider = make_axes_locatable(ax3)
+				cax = divider.append_axes('right',size='5%',pad=0.05)
+				cb3 = fig.colorbar(im3, cax=cax, orientation='vertical')
+				ax3.set_title('Residuals')
+
+				ax4.plot(fwhm_x[0:i+1],lw=2,label='FWHM X')
+				ax4.plot(fwhm_y[0:i+1],lw=2,label='FWHM Y')
+				ax4.legend(loc='lower right')
+				ax4.set_ylabel('FWHM (")')
+
+				plt.subplots_adjust(wspace=0.4,left=0.1,right=0.9)
+				plt.suptitle(f'{i+1} of {len(file_list)}')
+				plt.pause(0.2)
+				if not os.path.exists(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/fwhm_measurements/'):
+					os.mkdir(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/fwhm_measurements/')
+					set_tierras_permissions(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/fwhm_measurements/')
+				output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/fwhm_measurements/'+str(i).zfill(4)+'.jpg'
+				plt.savefig(output_path,dpi=100)
+				set_tierras_permissions(output_path)
+				ax1.cla()
+				cb1.remove()
+				ax2.cla()
+				cb2.remove()
+				ax3.cla()
+				cb3.remove()
+				ax4.cla()
 		
 		fwhm_x_save = copy.deepcopy(fwhm_x)
 		fwhm_y_save = copy.deepcopy(fwhm_y)
@@ -2198,6 +2402,130 @@ def t_or_f(arg):
 		return False
 	else:
 		print(f'ERROR: check passed argument for {arg}.')
+
+def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad_ref_threshold=5, iteration_limit=100, plots=False):
+    '''Based off the PINES algorithm, but entirely de-weights references if they have measured noise that is bad_ref_threshold times higher than their expected noise.
+    '''
+    #times = np.array(df['BJD TDB'])
+
+    n_refs = int(df.keys()[-1].split('Ref ')[1].split(' ')[0])
+    ref_inds = np.arange(n_refs)
+    n_ims = len(df)
+    raw_fluxes = np.zeros((n_ims,n_refs))
+    raw_flux_errs = np.zeros((n_ims,n_refs))
+    for i in range(n_refs):
+        raw_fluxes[:,i] = np.array(df[f'Ref {i+1} Source-Sky ADU'])
+        raw_flux_errs[:,i] = np.array(df[f'Ref {i+1} Source-Sky Error ADU'])
+    
+    w_var = np.mean(raw_flux_errs,axis=0)**2 #Set initial weights using calculated uncertainties
+    w_var /= sum(w_var)
+
+    #Do a 'crude' loop to first figure out which refs should be totally tossed out
+    corr_fluxes = np.zeros((n_ims,n_refs))
+    w_old = copy.deepcopy(w_var)
+    delta_weights = np.ones(n_refs)
+    count = 0 
+    while sum(delta_weights>crude_convergence)>0:
+        #print(f'{count+1}')
+        w_new = np.zeros(n_refs)
+        for i in range(n_refs):
+            salc_inds = np.delete(ref_inds, i) #Create a "special" ALC for this reference, using the fluxes of all OTHER reference stars. This is the main difference between the SPECULOOS and PINES algorithms. 
+            salc_fluxes = raw_fluxes[:,salc_inds]
+            w_salc = w_old[salc_inds]
+            w_salc /= sum(w_salc) #renormalize
+            salc = np.sum(w_salc*salc_fluxes,axis=1)
+
+            corr_flux = raw_fluxes[:,i]/salc #Correct using the salc
+            corr_flux /= np.mean(corr_flux) 
+            corr_fluxes[:,i] = corr_flux
+            v, l, h = sigmaclip(corr_flux)
+            use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
+            w_new[i] = 1/(np.std(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
+
+        w_new /= sum(w_new)
+        delta_weights = abs(w_old - w_new)
+        w_old = w_new
+        count += 1
+        if count == iteration_limit:
+            break 
+
+    #Now determine which refs should be totally excluded based on the ratio of their measured/expected noise. 
+    use_ref_inds = np.ones(n_refs,dtype='int')
+    for i in range(n_refs):
+        corr_flux = corr_fluxes[:,i]
+        raw_flux = raw_fluxes[:,i]
+        raw_flux_err = raw_flux_errs[:,i]
+
+        v, l, h = sigmaclip(corr_flux)
+        use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
+        norm = np.mean(raw_flux[use_inds])
+        #raw_flux_norm = raw_flux/norm 
+        raw_flux_err_norm = raw_flux_err/norm
+        expected = np.mean(raw_flux_err_norm)
+        measured = np.std(corr_flux[use_inds])
+        if measured/expected > bad_ref_threshold:
+            use_ref_inds[i] = 0
+
+    #Now do a more intensive loop with bad references given 0 weight. 
+    w_old *= use_ref_inds
+    w_old /= sum(w_old)
+    corr_fluxes = np.zeros((n_ims,n_refs))
+    delta_weights = np.ones(n_refs)
+    count = 0 
+    while sum(delta_weights>fine_convergence)>0:
+        #print(f'{count+1}')
+        w_new = np.zeros(n_refs)
+        for i in range(n_refs):
+            if use_ref_inds[i] == 0: #Don't bother optimizing on bad refs 
+               continue 
+            salc_inds = np.delete(ref_inds, i) #Create a "special" ALC for this reference, using the fluxes of all OTHER reference stars. This is the main difference between the SPECULOOS and PINES algorithms. 
+            salc_fluxes = raw_fluxes[:,salc_inds]
+            w_salc = w_old[salc_inds]
+            w_salc /= sum(w_salc) #renormalize
+            salc = np.sum(w_salc*salc_fluxes,axis=1)
+
+            corr_flux = raw_fluxes[:,i]/salc #Correct using the salc
+            corr_flux /= np.mean(corr_flux) 
+            corr_fluxes[:,i] = corr_flux
+            v, l, h = sigmaclip(corr_flux)
+            use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
+            w_new[i] = 1/(np.std(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
+
+        w_new /= sum(w_new)
+        delta_weights = abs(w_old - w_new)
+        w_old = w_new
+        count += 1
+        if count == iteration_limit:
+            break
+
+    alc = np.sum(w_new*raw_fluxes,axis=1)
+    alc_err = np.sqrt(np.sum((w_new*raw_flux_errs)**2,axis=1))
+
+    return w_new, alc, alc_err
+
+def weighted_alc(lc_path):
+	lc_path = Path(lc_path)
+	ffname = lc_path.parents[0].name
+	target = lc_path.parents[1].name
+	date = lc_path.parents[2].name
+	try:
+		weight_df = pd.read_csv(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/night_weights.csv')
+	except:
+		raise RuntimeError(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/night_weights.csv does not exist, run optimal_lc_chooser first!')
+	weights = np.array(weight_df['Weight'])
+	flux_df = pd.read_csv(lc_path)
+	n_refs = int(flux_df.keys()[-1].split('Ref ')[1].split(' ')[0])
+	n_ims = len(flux_df)
+	if n_refs != len(weight_df):
+		raise RuntimeError()
+	ref_fluxes = np.zeros((n_ims, n_refs))
+	ref_flux_errs = np.zeros((n_ims, n_refs))
+	for i in range(n_refs):
+		ref_fluxes[:,i] = np.array(flux_df[f'Ref {i+1} Source-Sky ADU'])
+		ref_flux_errs[:,i] = np.array(flux_df[f'Ref {i+1} Source-Sky Error ADU'])
+	alc = np.sum(weights*ref_fluxes,axis=1)
+	alc_err = np.sqrt(np.sum((weights*ref_flux_errs)**2,axis=1))
+	return alc, alc_err
 
 def main(raw_args=None):
 	ap = argparse.ArgumentParser()
