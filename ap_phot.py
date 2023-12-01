@@ -477,6 +477,9 @@ def align_and_stack_images(file_list, ref_image_buffer=10, n_ims_to_stack=20):
 	if reference_ind > len(file_list)-ref_image_buffer-n_ims_to_stack:
 		reference_ind = len(file_list)-ref_image_buffer-n_ims_to_stack
 
+	if len(file_list) < n_ims_to_stack:
+		reference_ind = int(len(file_list)/2)-1
+
 	reference_hdu = fits.open(file_list[reference_ind])[0] 
 	reference_image = reference_hdu.data
 	reference_header = reference_hdu.header
@@ -494,11 +497,14 @@ def align_and_stack_images(file_list, ref_image_buffer=10, n_ims_to_stack=20):
 	# #inds_to_stack = inds_excluding_reference[:n_ims_to_stack] #Count from 0...
 	# inds_to_stack = inds_excluding_reference[ref_image_num:ref_image_num+n_ims_to_stack] #Count from ref_image_num...
 
-	inds_to_stack = airmass_sort_inds[reference_ind+1:reference_ind+1+n_ims_to_stack]
+	if len(airmass_sort_inds) < n_ims_to_stack:
+		inds_to_stack = airmass_sort_inds
+	else:
+		inds_to_stack = airmass_sort_inds[reference_ind+1:reference_ind+1+n_ims_to_stack]
 	print('Aligning and stacking images...')
 	counter = 0 
 	for i in inds_to_stack:
-		print(f'{file_list[i]}, {counter+1} of {n_ims_to_stack}.')
+		print(f'{file_list[i]}, {counter+1} of {len(inds_to_stack)}.')
 		source_hdu = fits.open(file_list[i])[0]
 		source_image = source_hdu.data 
 		
@@ -593,11 +599,11 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			smoothed_fwhm_arcsec = savgol_filter(mean_fwhm, 11, 3)
 			smoothed_fwhm_pix = smoothed_fwhm_arcsec/PLATE_SCALE
 
-			plt.plot(mean_fwhm,label='Mean FWHM')
-			plt.plot(smoothed_fwhm_arcsec,label='Smoothed FWHM')
-			plt.ylabel('FWHM (")')
-			plt.legend()
-			breakpoint()
+			# plt.plot(mean_fwhm,label='Mean FWHM')
+			# plt.plot(smoothed_fwhm_arcsec,label='Smoothed FWHM')
+			# plt.ylabel('FWHM (")')
+			# plt.legend()
+			# breakpoint()
 
 	#Set up arrays for doing photometry 
 
@@ -926,10 +932,22 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 				#Measure shape by fitting a 2D Gaussian to the cutout.
 				#Don't do for every aperture size, just do it once. 
 				if k == 0:
-					g_init = models.Gaussian2D(amplitude=cutout[int(cutout.shape[1]/2), int(cutout.shape[0]/2)]-bkg,x_mean=cutout.shape[1]/2,y_mean=cutout.shape[0]/2, x_stddev=5, y_stddev=5)
+					g_2d_cutout = cutout[int(y_pos_cutout)-25:int(y_pos_cutout)+25,int(x_pos_cutout)-25:int(x_pos_cutout)+25]
+					xx2,yy2 = np.meshgrid(np.arange(g_2d_cutout.shape[1]),np.arange(g_2d_cutout.shape[0]))
+
+
+					g_init = models.Gaussian2D(amplitude=g_2d_cutout[int(g_2d_cutout.shape[1]/2), int(g_2d_cutout.shape[0]/2)]-bkg,x_mean=g_2d_cutout.shape[1]/2,y_mean=g_2d_cutout.shape[0]/2, x_stddev=5, y_stddev=5)
 					fit_g = fitting.LevMarLSQFitter()
-					g = fit_g(g_init,xx,yy,cutout-bkg)
+					g = fit_g(g_init,xx2,yy2,g_2d_cutout-bkg)
 					
+					g.theta.value = g.theta.value % (2*np.pi) #Constrain from 0-2pi
+					if g.y_stddev.value > g.x_stddev.value: 
+						x_stddev_save = g.x_stddev.value
+						y_stddev_save = g.y_stddev.value
+						g.x_stddev = y_stddev_save
+						g.y_stddev = x_stddev_save
+						g.theta += np.pi/2
+
 					x_stddev_pix = g.x_stddev.value
 					y_stddev_pix = g.y_stddev.value 
 					x_fwhm_pix = x_stddev_pix * 2*np.sqrt(2*np.log(2))
@@ -942,10 +960,11 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 					source_theta_radians[j,i] = theta_rad
 
 					# fig, ax = plt.subplots(1,2,figsize=(12,8),sharex=True,sharey=True)
-					# norm = ImageNormalize(cutout-bkg,interval=ZScaleInterval())
-					# ax[0].imshow(cutout-bkg,origin='lower',interpolation='none',norm=norm)
-					# ax[1].imshow(g(xx,yy),origin='lower',interpolation='none',norm=norm)
+					# norm = ImageNormalize(g_2d_cutout-bkg,interval=ZScaleInterval())
+					# ax[0].imshow(g_2d_cutout-bkg,origin='lower',interpolation='none',norm=norm)
+					# ax[1].imshow(g(xx2,yy2),origin='lower',interpolation='none',norm=norm)
 					# plt.tight_layout()
+					# breakpoint()
 
 				#Plot normalized target source-sky as you go along
 				if live_plot and j == 0 and k == ap_plot_ind:
@@ -1659,9 +1678,9 @@ def plot_target_summary(file_path,pval_threshold=0.01,bin_mins=15):
 	ax6.legend(loc='center left', bbox_to_anchor=(1,0.5),fontsize=10)
 	ax6.tick_params(labelsize=label_size)
 	ax6.set_ylabel('FWHM\n(")',fontsize=label_size)
-	v1,l1,h1 = sigmaclip(ancillary_dict['Target X FWHM Arcsec'],5,5)
-	v2,l2,h2 = sigmaclip(ancillary_dict['Target Y FWHM Arcsec'],5,5)
-	ax6.set_ylim(np.min([l1,l2]),np.max([h1,h2]))
+	# v1,l1,h1 = sigmaclip(ancillary_dict['Target X FWHM Arcsec'],4,4)
+	# v2,l2,h2 = sigmaclip(ancillary_dict['Target Y FWHM Arcsec'],4,4)
+	# ax6.set_ylim(np.min([l1,l2]),np.max([h1,h2]))
 	ax6.set_xlabel(f'Time - {x_offset}'+' (BJD$_{TDB}$)',fontsize=label_size)
 	#ax6.set_xticklabels([f'{val:.3f}' for val in ax1.get_xticks()])
 
@@ -2081,7 +2100,7 @@ def transit_model(times, T0,P,Rp,a,inc,ecc,w,u1,u2):
 def moving_average(x, w):
     return np.convolve(x, np.ones(w), 'same') / w
 
-def optimal_lc_chooser(date, target, ffname, overwrite=False, start_time=0, stop_time=0, plot=False):
+def optimal_lc_chooser(date, target, ffname, overwrite=True, start_time=0, stop_time=0, plot=False):
 	optimum_lc_file = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt'
 	weight_file = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/night_weights.csv'
 
@@ -2216,7 +2235,8 @@ def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 
 		fwhm_x = np.zeros(len(file_list))
 		fwhm_y = np.zeros(len(file_list))
-		
+		theta = np.zeros(len(file_list))
+
 		if plots:
 			fig = plt.figure(figsize=(10,7))
 			gs = gridspec.GridSpec(2,3)
@@ -2253,10 +2273,18 @@ def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 			#Fit a 2D gaussian to the cutout
 			xx,yy = np.meshgrid(np.arange(cutout.shape[1]),np.arange(cutout.shape[0]))
 			g_init = models.Gaussian2D(amplitude=cutout[int(cutout.shape[1]/2), int(cutout.shape[0]/2)]-np.median(cutout),x_mean=cutout.shape[1]/2,y_mean=cutout.shape[0]/2, x_stddev=5, y_stddev=5)
-			#g_init.theta.bounds = (0,np.pi)
+			# g_init.theta.bounds = (-np.pi/2, np.pi/2)
 			fit_g = fitting.LevMarLSQFitter()
 			g = fit_g(g_init,xx,yy,cutout-np.median(cutout))
-			
+
+			g.theta.value = g.theta.value % (2*np.pi) #Constrain from 0-2pi
+			if g.y_stddev.value > g.x_stddev.value: 
+				x_stddev_save = g.x_stddev.value
+				y_stddev_save = g.y_stddev.value
+				g.x_stddev = y_stddev_save
+				g.y_stddev = x_stddev_save
+				g.theta += np.pi/2
+
 			x_stddev_pix = g.x_stddev.value
 			y_stddev_pix = g.y_stddev.value 
 			x_fwhm_pix = x_stddev_pix * 2*np.sqrt(2*np.log(2))
@@ -2264,8 +2292,10 @@ def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 			x_fwhm_arcsec = x_fwhm_pix * PLATE_SCALE
 			y_fwhm_arcsec = y_fwhm_pix * PLATE_SCALE
 			theta_rad = g.theta.value
+			theta[i] = theta_rad
 			fwhm_x[i] = x_fwhm_arcsec
 			fwhm_y[i] = y_fwhm_arcsec
+
 			print(f'{i+1} of {len(file_list)}')
 
 			if plots:
@@ -2312,6 +2342,7 @@ def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 		
 		fwhm_x_save = copy.deepcopy(fwhm_x)
 		fwhm_y_save = copy.deepcopy(fwhm_y)
+		theta_save = copy.deepcopy(theta)
 
 		#Sigma clip the results
 		v1,l1,h1 = sigmaclip(fwhm_x)
@@ -2342,7 +2373,7 @@ def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 		set_tierras_permissions(output_path)
 
 		#Write out fwhm measurements
-		output_dict_2 = {'FWHM X':fwhm_x_save, 'FWHM Y':fwhm_y_save}
+		output_dict_2 = {'FWHM X':fwhm_x_save, 'FWHM Y':fwhm_y_save, 'Theta':theta_save}
 		output_df_2 = pd.DataFrame(output_dict_2)
 		output_df_2.to_csv(output_path_2,index=False)
 		set_tierras_permissions(output_path_2)
@@ -2592,9 +2623,10 @@ def main(raw_args=None):
 	print(f'Optimal light curve: {optimal_lc_path}')
 	
 	#Use the optimal aperture to plot the target light curve
-	plot_target_lightcurve(optimal_lc_path, regression=regress_flux)
-	
+	plot_target_summary(optimal_lc_path)
+	plot_target_lightcurve(optimal_lc_path)
 	plot_ref_lightcurves(optimal_lc_path)
+	plot_raw_fluxes(optimal_lc_path)
 
 if __name__ == '__main__':
 	main()
