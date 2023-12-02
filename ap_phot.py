@@ -2162,8 +2162,12 @@ def optimal_lc_chooser(date, target, ffname, overwrite=True, start_time=0, stop_
 			times_eval = times[eval_inds]
 			flux_eval = rel_targ_flux[eval_inds]
 			
+			
 			#Option 1: Evaluate the median standard deviation over 5-minute intervals 
-			bin_inds = tierras_binner_inds(times_eval, bin_mins=5)
+			try:
+				bin_inds = tierras_binner_inds(times_eval, bin_mins=5)
+			except:
+				breakpoint()
 			stddevs = np.zeros(len(bin_inds))
 			for j in range(len(bin_inds)):
 				stddevs[j] = np.nanstd(flux_eval[bin_inds[j]])
@@ -2453,7 +2457,7 @@ def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad
         raw_flux_errs[:,i] = np.array(df[f'Ref {i+1} Source-Sky Error ADU'])
 	
     w_var = np.nanmean(raw_flux_errs,axis=0)**2 #Set initial weights using calculated uncertainties
-    w_var /= sum(w_var)
+    w_var /= np.nansum(w_var)
 
     #Do a 'crude' loop to first figure out which refs should be totally tossed out
     corr_fluxes = np.zeros((n_ims,n_refs))
@@ -2467,17 +2471,17 @@ def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad
             salc_inds = np.delete(ref_inds, i) #Create a "special" ALC for this reference, using the fluxes of all OTHER reference stars. This is the main difference between the SPECULOOS and PINES algorithms. 
             salc_fluxes = raw_fluxes[:,salc_inds]
             w_salc = w_old[salc_inds]
-            w_salc /= sum(w_salc) #renormalize
-            salc = np.sum(w_salc*salc_fluxes,axis=1)
+            w_salc /= np.nansum(w_salc) #renormalize
+            salc = np.nansum(w_salc*salc_fluxes,axis=1)
 
             corr_flux = raw_fluxes[:,i]/salc #Correct using the salc
-            corr_flux /= np.mean(corr_flux) 
+            corr_flux /= np.nanmean(corr_flux) 
             corr_fluxes[:,i] = corr_flux
             v, l, h = sigmaclip(corr_flux)
             use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
-            w_new[i] = 1/(np.std(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
+            w_new[i] = 1/(np.nanstd(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
 
-        w_new /= sum(w_new)
+        w_new /= np.nansum(w_new)
         delta_weights = abs(w_old - w_new)
         w_old = w_new
         count += 1
@@ -2493,17 +2497,17 @@ def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad
 
         v, l, h = sigmaclip(corr_flux)
         use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
-        norm = np.mean(raw_flux[use_inds])
+        norm = np.nanmean(raw_flux[use_inds])
         #raw_flux_norm = raw_flux/norm 
         raw_flux_err_norm = raw_flux_err/norm
-        expected = np.mean(raw_flux_err_norm)
-        measured = np.std(corr_flux[use_inds])
+        expected = np.nanmean(raw_flux_err_norm)
+        measured = np.nanstd(corr_flux[use_inds])
         if measured/expected > bad_ref_threshold:
             use_ref_inds[i] = 0
 
     #Now do a more intensive loop with bad references given 0 weight. 
     w_old *= use_ref_inds
-    w_old /= sum(w_old)
+    w_old /= np.nansum(w_old)
     corr_fluxes = np.zeros((n_ims,n_refs))
     delta_weights = np.ones(n_refs)
     count = 0 
@@ -2516,26 +2520,28 @@ def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad
             salc_inds = np.delete(ref_inds, i) #Create a "special" ALC for this reference, using the fluxes of all OTHER reference stars. This is the main difference between the SPECULOOS and PINES algorithms. 
             salc_fluxes = raw_fluxes[:,salc_inds]
             w_salc = w_old[salc_inds]
-            w_salc /= sum(w_salc) #renormalize
-            salc = np.sum(w_salc*salc_fluxes,axis=1)
+            w_salc /= np.nansum(w_salc) #renormalize
+            salc = np.nansum(w_salc*salc_fluxes,axis=1)
 
             corr_flux = raw_fluxes[:,i]/salc #Correct using the salc
-            corr_flux /= np.mean(corr_flux) 
+            corr_flux /= np.nanmean(corr_flux) 
             corr_fluxes[:,i] = corr_flux
             v, l, h = sigmaclip(corr_flux)
             use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
-            w_new[i] = 1/(np.std(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
+            w_new[i] = 1/(np.nanstd(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
 
-        w_new /= sum(w_new)
+        w_new /= np.nansum(w_new)
         delta_weights = abs(w_old - w_new)
         w_old = w_new
         count += 1
         if count == iteration_limit:
             break
 
-    alc = np.sum(w_new*raw_fluxes,axis=1)
-    alc_err = np.sqrt(np.sum((w_new*raw_flux_errs)**2,axis=1))
+    alc = np.nansum(w_new*raw_fluxes,axis=1)
+    alc_err = np.sqrt(np.nansum((w_new*raw_flux_errs)**2,axis=1))
 
+    if len(np.where(alc == 0)[0]) == len(alc):
+        breakpoint()
     return w_new, alc, alc_err
 
 def weighted_alc(lc_path):
