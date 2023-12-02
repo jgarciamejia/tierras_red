@@ -568,16 +568,20 @@ def jd_utc_to_bjd_tdb(jd_utc, ra, dec, location='Whipple'):
     return (input_jd_utc.tdb + ltt_bary).value
 
 def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, an_out=60, centroid=False, live_plot=False, type='fixed'):
+
+
 	ffname = file_list[0].parent.name	
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
 
-	#file_list = file_list[-5:] #TESTING!!!
+	#file_list = file_list[383:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
 	SATURATION_TRESHOLD = 55000. #ADU
 	PLATE_SCALE = 0.43 #arcsec pix^-1, from Juliana's dissertation Table 1.1
+
+	centroid_mask_half_l = 7 #If centroiding is performed, a box of size 2*centroid_mask_half_l x 2*centroid_mask_half_l is used to mask out around the source's expected position (reduces chance of measuring a bad centroid)
 	
 	#If doing variable aperture photometry, read in FWHM X/Y data and set aperture radii 
 	if type == 'variable':
@@ -814,15 +818,16 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 				# centroid_mask[:,cutout.shape[1]-int(an_out/2):] = True
 
 				#TODO: What size should this mask be? Should we use the bad pixel mask instead? Should we just toss any stars that are remotely close to bad columns? 
-				centroid_mask[0:int(cutout.shape[1]/2)-7,:] = True
-				centroid_mask[:,0:int(cutout.shape[0]/2)-7] = True
-				centroid_mask[int(cutout.shape[0]/2)+7:,:] = True
-				centroid_mask[:,int(cutout.shape[0]/2)+7:] = True
+				centroid_mask[0:int(cutout.shape[1]/2)-centroid_mask_half_l,:] = True
+				centroid_mask[:,0:int(cutout.shape[0]/2)-centroid_mask_half_l] = True
+				centroid_mask[int(cutout.shape[0]/2)+centroid_mask_half_l:,:] = True
+				centroid_mask[:,int(cutout.shape[0]/2)+centroid_mask_half_l:] = True
 				x_pos_cutout_centroid, y_pos_cutout_centroid = centroid_1dg(cutout-np.median(cutout),mask=centroid_mask)
 				
 
-				#Make sure the measured centroid is actually in the cutout
-				if (x_pos_cutout_centroid > 0) and (x_pos_cutout_centroid < cutout.shape[1]) and (y_pos_cutout_centroid > 0) and (y_pos_cutout_centroid < cutout.shape[0]):
+				#Make sure the measured centroid is actually in the unmasked region
+				#if (x_pos_cutout_centroid > 0) and (x_pos_cutout_centroid < cutout.shape[1]) and (y_pos_cutout_centroid > 0) and (y_pos_cutout_centroid < cutout.shape[0]):
+				if (abs(x_pos_cutout-int(cutout.shape[1]/2)) > centroid_mask_half_l) or (abs(y_pos_cutout-int(cutout.shape[0]/2)) > centroid_mask_half_l):
 					x_pos_cutout = x_pos_cutout_centroid
 					y_pos_cutout = y_pos_cutout_centroid
 				
@@ -932,10 +937,9 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 				#Measure shape by fitting a 2D Gaussian to the cutout.
 				#Don't do for every aperture size, just do it once. 
 				if k == 0:
-					g_2d_cutout = cutout[int(y_pos_cutout)-25:int(y_pos_cutout)+25,int(x_pos_cutout)-25:int(x_pos_cutout)+25]
+					#g_2d_cutout = cutout[int(y_pos_cutout)-25:int(y_pos_cutout)+25,int(x_pos_cutout)-25:int(x_pos_cutout)+25]
+					g_2d_cutout = copy.deepcopy(cutout)
 					xx2,yy2 = np.meshgrid(np.arange(g_2d_cutout.shape[1]),np.arange(g_2d_cutout.shape[0]))
-
-
 					g_init = models.Gaussian2D(amplitude=g_2d_cutout[int(g_2d_cutout.shape[1]/2), int(g_2d_cutout.shape[0]/2)]-bkg,x_mean=g_2d_cutout.shape[1]/2,y_mean=g_2d_cutout.shape[0]/2, x_stddev=5, y_stddev=5)
 					fit_g = fitting.LevMarLSQFitter()
 					g = fit_g(g_init,xx2,yy2,g_2d_cutout-bkg)
@@ -2447,8 +2451,8 @@ def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad
     for i in range(n_refs):
         raw_fluxes[:,i] = np.array(df[f'Ref {i+1} Source-Sky ADU'])
         raw_flux_errs[:,i] = np.array(df[f'Ref {i+1} Source-Sky Error ADU'])
-    
-    w_var = np.mean(raw_flux_errs,axis=0)**2 #Set initial weights using calculated uncertainties
+	
+    w_var = np.nanmean(raw_flux_errs,axis=0)**2 #Set initial weights using calculated uncertainties
     w_var /= sum(w_var)
 
     #Do a 'crude' loop to first figure out which refs should be totally tossed out
