@@ -20,6 +20,16 @@ from imred import *
 
 import logging
 
+
+def set_tierras_permissions(path): # copied from ap_phot.py
+	try:
+		os.chmod(path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
+		shutil.chown(path, user=None, group='exoplanet')
+	except:
+		print(f'Could not change permissions on {path}, returning.')
+	return 
+
+
 def create_directories(basepath,date,target,folder1):
     datepath = os.path.join(basepath,date)
     targetpath = os.path.join(datepath,target)
@@ -28,11 +38,14 @@ def create_directories(basepath,date,target,folder1):
     if not os.path.exists(datepath):
         logging.info('Creating {} Directory'.format(datepath))
         os.system('mkdir {}'.format(datepath))
+        set_tierras_permissions(datepath)
     
     if not os.path.exists(targetpath):
         logging.info('Creating {} Directory'.format(targetpath))
         os.system('mkdir {}'.format(targetpath))
+        set_tierras_permissions(targetpath)
         os.system('mkdir {}'.format(folder1path))
+        set_tierras_permissions(folder1path)
 
     return folder1path
 
