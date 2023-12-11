@@ -2597,6 +2597,9 @@ def weighted_alc(lc_path):
 	alc_err = np.sqrt(np.sum((weights*ref_flux_errs)**2,axis=1))
 	return alc, alc_err
 
+def test_function():
+	return
+
 def main(raw_args=None):
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-date", required=True, help="Date of observation in YYYYMMDD format.")
