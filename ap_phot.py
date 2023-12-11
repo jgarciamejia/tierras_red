@@ -1732,76 +1732,6 @@ def plot_target_summary(file_path,pval_threshold=0.01,bin_mins=15):
 	plt.savefig(summary_plot_output_path,dpi=300)
 	set_tierras_permissions(summary_plot_output_path)
 
-	# if regression:
-	# 	regr = linear_model.LinearRegression()
-	# 	regress_dict = {}
-		
-	# 	#Check for significant correlations between ancillary data and corrected target flux
-	# 	for key in ancillary_dict:
-	# 		try:
-	# 			corr, pvalue = pearsonr(corrected_targ_flux,ancillary_dict[key])
-	# 		except:
-	# 			continue
-	# 		if pvalue < pval_threshold:
-	# 			regress_dict[key] = ancillary_dict[key]
-	# 			print(f'{key}, corr:{corr:.2f}, P-value: {pvalue:.2E}')
-		  
-	# 	regress_dict['flux'] = corrected_targ_flux
-	# 	keylist = list(regress_dict.keys())
-		
-	# 	regress_df = pd.DataFrame(regress_dict, columns=list(regress_dict.keys()))
-	# 	x = regress_df[keylist[0:len(keylist)-1]]
-	# 	y = regress_df['flux']
-	# 	regr.fit(x,y)
-	# 	regression_model = regr.intercept_
-
-	# 	# planet_model_ind = np.where(np.array(keylist) == 'Planet Model')[0][0]
-	# 	# regr.coef_[planet_model_ind] = 1 #FORCE this to be 1
-	# 	for i in range(len(keylist[:-1])):
-	# 		print(f'{regr.coef_[i]:.4E}*{keylist[i]}')
-	# 		regression_model += regr.coef_[i]*regress_dict[keylist[i]]
-
-	# 	ax[1].plot(times, regression_model, lw=2, zorder=4, label='Linear regression model')
-	# 	ax[1].legend()
-
-	# 	plt.figure()
-	# 	regressed_flux = corrected_targ_flux/regression_model
-	# 	regressed_flux /= np.mean(regressed_flux)	
-	# 	# coeffs = np.polyfit(times[np.where(times>0.72)[0]],regressed_flux[np.where(times>0.72)[0]],1)
-	# 	# fit = times*coeffs[0]+coeffs[1]
-	# 	# regressed_flux /= fit
-
-
-	# 	points_to_bin = 20
-	# 	n_bins = int(np.ceil(len(times)/points_to_bin))
-	# 	bx = np.zeros(n_bins)
-	# 	by = np.zeros(n_bins)
-	# 	bye = np.zeros(n_bins)
-	# 	for i in range(n_bins):
-	# 		if i == n_bins-1:
-	# 			bin_inds = np.arange(i*points_to_bin,len(times))
-	# 		else:
-	# 			bin_inds = np.arange(i*points_to_bin,(i+1)*points_to_bin)
-	# 		bx[i] = np.mean(times[bin_inds])
-	# 		by[i] = np.mean(regressed_flux[bin_inds])
-	# 		bye[i] = np.std(regressed_flux[bin_inds])/np.sqrt(len(bin_inds))
-	# 	plt.plot(times, regressed_flux, marker='.',color='#b0b0b0',ls='')
-	# 	#plt.plot(times, regressed_flux+regr.coef_[-1]*ancillary_dict['Planet Model'], marker='.',color='k',ls='')
-	# 	#plt.plot(times, planet_model, lw=2)
-	# 	plt.errorbar(bx, by, bye, marker='o', color='none', mec='k', ecolor='k', mew=2, ls='', zorder=3)
-
-
-	# plt.figure()
-	# airmass_corrs = np.zeros(len(targ_and_refs))
-	# dists = np.sqrt((targ_and_refs['x'][1:]-targ_and_refs['x'][0])**2+(targ_and_refs['y'][1:]-targ_and_refs['y'][0])**2)
-	# for i in range(len(targ_and_refs)):
-	# 	if i == 0:
-	# 		name = 'Target'
-	# 	else:
-	# 		name = f'Ref {i}'
-	# 	corr,pval =  pearsonr(df['Airmass'][use_inds],df[name+' Relative Flux'][use_inds])
-	# 	airmass_corrs[i] = corr
-	# plt.scatter(targ_and_refs['bp_rp'],airmass_corrs)
 	plt.close('all')
 	return
 
@@ -2596,6 +2526,55 @@ def weighted_alc(lc_path):
 	alc = np.sum(weights*ref_fluxes,axis=1)
 	alc_err = np.sqrt(np.sum((weights*ref_flux_errs)**2,axis=1))
 	return alc, alc_err
+
+def regression(flux, ancillary_dict, pval_threshold=1e-3):
+	'''
+		PURPOSE: 
+			Identifies data vectors that are significantly correlated with a flux array and performs a linear regression with those vectors to correct the flux.
+		INPUTS:
+			flux (array): The flux that you wish to correct.
+			ancillary_dict (dict): A dictionary containing the data vectors that you would like to test in the regression. E.g., {'X':x_position,'Y':y_position,'FWHM X':fwhm_x,'FWHM Y':fwhm_y, 'Airmass':airmass}
+			pval_threshold (float): The P-value of the null hypothesis that a data vector and flux are not correlated. If the measured P-value is less than pval_threshold, the associated vector is used in the regression.
+		OUTPUTS:
+			regressed_flux (array): Array of fluxes corrected by the regression model
+			regression_model (array): Array of regression model fluxes
+
+	'''
+	regr = linear_model.LinearRegression()
+	regress_dict = {}
+	
+	#Check for significant correlations between ancillary data and corrected target flux.
+	#Any significantly correlated vectors get added to regress_dict
+	for key in ancillary_dict:
+		try:
+			corr, pvalue = pearsonr(flux,ancillary_dict[key])
+		except:
+			continue
+		if pvalue < pval_threshold:
+			regress_dict[key] = ancillary_dict[key]
+			print(f'{key}, corr:{corr:.2f}, P-value: {pvalue:.2E}')
+		
+	regress_dict['flux'] = flux
+	keylist = list(regress_dict.keys())
+	
+	regress_df = pd.DataFrame(regress_dict, columns=list(regress_dict.keys()))
+	x = regress_df[keylist[0:len(keylist)-1]]
+	y = regress_df['flux']
+
+	#Perform regression and unpack the model
+	regr.fit(x,y)
+	regression_model = regr.intercept_
+	for i in range(len(keylist[:-1])):
+		print(f'{regr.coef_[i]:.4E}*{keylist[i]}')
+		regression_model += regr.coef_[i]*regress_dict[keylist[i]]
+
+	#Correct the flux with the regression model 
+	regressed_flux = flux/regression_model
+
+	return regressed_flux, regression_model
+
+def quotient_uncertainty(a,a_err,b,b_err):
+	return np.sqrt((a_err/b)**2+(a*b_err/(b**2))**2)
 
 def main(raw_args=None):
 	ap = argparse.ArgumentParser()
