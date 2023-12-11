@@ -2216,7 +2216,7 @@ def optimal_lc_chooser(date, target, ffname, overwrite=True, start_time=0, stop_
 		if plot:
 			ax[-1].set_xlabel('Time (BJD$_{TDB}$)')
 			plt.tight_layout()
-			optimized_lc_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{date}_{target}_optimized_lc_.png'
+			optimized_lc_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{date}_{target}_optimized_lc.png'
 			plt.savefig(optimized_lc_path,dpi=300)
 			set_tierras_permissions(optimized_lc_path)
 		
