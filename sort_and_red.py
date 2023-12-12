@@ -38,14 +38,17 @@ def create_directories(basepath,date,target,folder1):
     if not os.path.exists(datepath):
         logging.info('Creating {} Directory'.format(datepath))
         os.system('mkdir {}'.format(datepath))
-        set_tierras_permissions(datepath)
+        os.system('chmod g+rwx {}'.format(datepath))
+        #set_tierras_permissions(datepath)
     
     if not os.path.exists(targetpath):
         logging.info('Creating {} Directory'.format(targetpath))
         os.system('mkdir {}'.format(targetpath))
-        set_tierras_permissions(targetpath)
+        os.system('chmod g+rwx {}'.format(targetpath))
+        #set_tierras_permissions(targetpath)
         os.system('mkdir {}'.format(folder1path))
-        set_tierras_permissions(folder1path)
+        os.system('chmod g+rwx {}'.format(folder1path))
+        #set_tierras_permissions(folder1path)
 
     return folder1path
 
@@ -74,7 +77,7 @@ lcpath = '/data/tierras/lightcurves'
 
 # Create flattened file and light curve directories 
 ffolder = create_directories(fpath,date,target,ffname)
-lcfolder = create_directories(lcpath,date,target,ffname)
+#lcfolder = create_directories(lcpath,date,target,ffname) JGM Dec2023: PT doing this in ap_phot.py 
 
 # Set up logger
 logfile = os.path.join(ffolder,'{}.{}.redlog.txt'.format(date,target))
