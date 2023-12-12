@@ -29,6 +29,7 @@ from ap_phot import set_tierras_permissions
 # 		print(f'Could not change permissions on {path}, returning.')
 # 	return 
 
+# updated DEC 12/2023
 
 def create_directories(basepath,date,target,folder1):
     datepath = os.path.join(basepath,date)
