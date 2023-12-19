@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-# To use, pass the script: maxSTDCRMS minNUMBRMS filenames 
-
 import numpy as np
 from fitsutil import *
 

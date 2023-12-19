@@ -16,7 +16,7 @@ import os
 MIN_FLAT_EXPTIME = 9  #sec
 
 # Max allowed lunar illumination fraction
-MAX_MOON_ILLUM = .1
+MAX_MOON_ILLUM = .011
 
 # Path to INCOMING folder
 PATH = '/data/tierras/incoming/'
@@ -29,16 +29,16 @@ def main():
   
   obsdates = os.listdir(PATH)
   for obsdate  in obsdates:
+
     print (obsdate)
-    filenames = np.sort(glob.glob(PATH+'obsdate'+'/*FLAT*fit'))
-  # iterate through files, and rank from least (Moon) bright to most
+    filenames = numpy.sort(glob.glob(PATH+obsdate+'/*FLAT*fit'))
 
     fnums = []
     exptimes = []
     elevs = []
     illums = []
-
-    for ifile, fitsfile in enumerate(args.filenames):
+  # iterate through files, and rank from least (Moon) bright to mos
+    for ifile, fitsfile in enumerate(filenames):
       #print (fitsfile)
       if 'medfilt_kernel' in fitsfile:
         continue

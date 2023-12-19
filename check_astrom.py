@@ -3,11 +3,15 @@
 # To use, pass the script: maxSTDCRMS minNUMBRMS filenames 
 
 import numpy as np
-from astropy.io import fits 
 import sys
-import matplotlib.pyplot as plt
+import os
 import re
 import pdb
+import glob
+
+from scipy import stats
+from astropy.io import fits 
+import matplotlib.pyplot as plt
 
 print ('Checking astrometric solution on plate solved files...')
 
@@ -21,22 +25,19 @@ maxrms, minnum = float(sys.argv[1]),float(sys.argv[2])
 
 stdcrms_lst = np.array([])
 numbrms_lst = np.array([])
-
+exptimes = np.array([])
 flagged_files = np.array([])
 
 for ifile,fits_filename in enumerate(sys.argv[3:]):
-    #print (fits_filename)
     if '_red' in fits_filename:
-        #print ('reduced image')
-        hdr_ind = 0 # 0 if image passed through imred, 1 if not
+        hdr_ind = 0
     elif '_red' not in fits_filename:
         hdr_ind = 1
     hdr = fits.getheader(fits_filename,hdr_ind)
-    #print (fits_filename)
     # read out astrometric fit coordinate rms (arcsec)
     # and number of astrometric standards used. 
     try:
-        stdcrms, numbrms = hdr['STDCRMS'], hdr['NUMBRMS']
+        stdcrms, numbrms, exptime = hdr['STDCRMS'], hdr['NUMBRMS'], hdr['EXPTIME']
     except KeyError:
         print ('Astrom failed for:')
         print (fits_filename)
@@ -50,18 +51,37 @@ for ifile,fits_filename in enumerate(sys.argv[3:]):
         print ('numbrms < {} for:'.format(minnum))
         print (fits_filename,numbrms)
         flagged_files = np.append(flagged_files, fits_filename)
+    if stdcrms <= maxrms and numbrms >= minnum:
+        stdcrms_lst = np.append(stdcrms_lst,stdcrms)
+        numbrms_lst = np.append(numbrms_lst, numbrms)
+    exptimes = np.append(exptimes, exptime)
 
-    stdcrms_lst = np.append(stdcrms_lst,stdcrms)
-    numbrms_lst = np.append(numbrms_lst, numbrms)
+# Add any files with different exposure time to majority to flagged list
+texp = stats.mode(exptimes)[0][0]
+print ('Stack Exposure Time: {} s'.format(texp))
+for ifile, fits_filename in enumerate(sys.argv[3:]):
+    if exptimes[ifile] != texp:
+        print ('texp = {} s for:'.format(exptimes[ifile]))
+        print (fits_filename)
+        flagged_files = np.append(flagged_files,fits_filename)
+print ('Exposure Time Checks Done')
 
+# Save flagged file list for future ref
 if len(flagged_files) >= 1:
     print ('saved a list of flagged files')
 elif len(flagged_files) == 0:
     print ('no flagged files')
 np.savetxt('{}.{}.flagged_files.txt'.format(DATE,TARGET),np.unique(flagged_files),fmt='%s')
 
-print ('Astrom checks Done.')
-print ('If no filenames were printed above, astrom succesful on all files.')
+#Make excluded directory and move flagged files there
+os.system('mkdir excluded')
+path = os.getcwd()
+for flaggedfile in flagged_files:
+    if not os.path.exists(os.path.join(path,"excluded/",flaggedfile)):
+        os.system('mv '+ flaggedfile +"excluded/")
+
+print ('Astrometry Checks Done')
+
 
 fig, (ax1,ax2) = plt.subplots(1,2,figsize=(14,7))
 fig.suptitle('Astrometry Evaluation')
@@ -75,34 +95,3 @@ ax2.set_ylabel('Number of Exposures')
 ax2.set_xlabel('Number of astrometric standards used')
 fig.savefig("{0}.{1}_astrom_hist.pdf".format(DATE,TARGET))
 plt.show()
-'''
-# Deprecated version of the loop above, to print how many files 
-# there are above or below a certain threshold value for stdcrms and numbrms
-
-for ifile,fits_filename in enumerate(sys.argv[1:]):
-    # print (fits_filename)
-    hdr = fits.getheader(fits_filename,1)
-    # print (hdr['HISTORY']) # as a check to confirm that headers were updated by astrom
-    # read out astrometric fit coordinate rms (arcsec)
-    # and number of astrometric standards used. 
-    stdcrms, numbrms = hdr['STDCRMS'], hdr['NUMBRMS']
-    if stdcrms >= maxrms:
-        #print (fits_filename)
-        #print ("STDCRMS is too high")
-        #print ("STDCRMS = {0}".format(hdr['STDCRMS']))
-        nstdcrms += 1
-    if numbrms <= minnum:
-        #print (fits_filename)
-        #print ("NUMBRMS is too low")
-        #print ("NUMBRMS = {1}".format(hdr['NUMBRMS']))
-        nnumbrms += 1 
-
-print ("STDCRMS > {0} for {1} files".format(maxrms,nstdcrms))
-print ("NUMBRMS < {0} for {1} files".format(minnum,nnumbrms))
-#    with fits.open(fits_filename,'update') as f:
-#        for hdu in f:
-#            hdu.header['CAT-RA']='04:12:58.00'
-#            hdu.header['CAT-DEC']='+52:36:23.9'
-#        print ('After Modification')
-#        print (hdu.header['CAT-RA'],hdu.header['CAT-DEC'])
-'''

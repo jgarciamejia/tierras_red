@@ -11,10 +11,6 @@ sample_filename = sys.argv[1]
 DATE = re.split('\.',sample_filename)[0]
 TARGET = re.split('\.', sample_filename)[2]
 
-#desired_exptime = 60.0
-#print ('Desired exp time = {0} sec.'.format(desired_exptime))
-
-#nfiles = len(sys.argv[1:])
 exptimes = np.array([])
 filenums = np.array([])
 
