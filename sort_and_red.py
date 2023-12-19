@@ -19,7 +19,6 @@ import matplotlib.pyplot as plt
 from imred import *
 
 import logging
-from ap_phot import set_tierras_permissions
 
 def create_directories(basepath,date,target,folder1):
     datepath = os.path.join(basepath,date)
