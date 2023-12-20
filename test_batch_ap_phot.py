@@ -23,7 +23,7 @@ targ_distance_limit = args.targ_distance_limit
 path = '/data/tierras/flattened'
 folderlist = np.sort(glob.glob(path+"/**/"+targetname))
 datelist =  [folderlist[ind].split("/")[4] for ind in range(len(folderlist))]
-print ("{} has been observed And reduced on {} nights. More nights may have been observed but remain unprocessed.".format(targetname,len(datelist)))
+print ("{} has been observed AND reduced on {} nights. More nights may have been observed but remain unprocessed.".format(targetname,len(datelist)))
 
 failed_dates = [ ] # future improvement: all exceptions are not necessarily photometry fails! Gotta make the loop better:
 for i in range(len(datelist)):
@@ -35,3 +35,5 @@ for i in range(len(datelist)):
 		print(f"Error in Iteration {i}: {e}")
 		failed_dates.append(datelist[i])
 		continue
+
+print ("Photometric extraction failed on the following dates: {}".format(failed_dates))
