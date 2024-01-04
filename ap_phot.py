@@ -581,7 +581,6 @@ def jd_utc_to_bjd_tdb(jd_utc, ra, dec, location='Whipple'):
 
 def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, an_out=60, centroid=False, live_plot=False, type='fixed'):
 
-
 	ffname = file_list[0].parent.name	
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
@@ -762,6 +761,9 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			ret_temps[i] = source_header['RETTEMP']
 			pri_temps[i] = source_header['PRITEMP']
 			dewpoints[i] = source_header['DEWPOINT']
+			temps[i] = source_header['TEMPERAT']
+			humidities[i] = source_header['HUMIDITY']
+			sky_temps[i] = source_header['SKYTEMP']
 		except:
 			dome_humidities[i] = np.nan
 			dome_temps[i] = np.nan
@@ -772,10 +774,9 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			ret_temps[i] = np.nan
 			pri_temps[i] = np.nan
 			dewpoints[i] = np.nan
-
-		temps[i] = source_header['TEMPERAT']
-		humidities[i] = source_header['HUMIDITY']
-		sky_temps[i] = source_header['SKYTEMP']
+			temps[i] = np.nan
+			humidities[i] = np.nan
+			sky_temps[i] = np.nan
 
 		#lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary
 		
@@ -1028,7 +1029,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			alc_norm = ensemble_alc_ADU[ap_plot_ind,0,0:i+1]/alc_renorm_factor
 			alc_norm_err = ensemble_alc_err_ADU[ap_plot_ind,0,0:i+1]/alc_renorm_factor
 			v,l,h=sigmaclip(alc_norm[~np.isnan(alc_norm)])
-			ax4.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ALC flux')
+			ax4.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ensemble ALC flux')
 			try:
 				ax4.set_ylim(l,h)
 			except:
@@ -1038,7 +1039,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			corrected_flux = targ_norm/alc_norm
 			corrected_flux_err = np.sqrt((targ_norm_err/alc_norm)**2+(targ_norm*alc_norm_err/(alc_norm**2))**2)
 			v,l,h=sigmaclip(corrected_flux)
-			ax5.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Corrected target flux')
+			ax5.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),corrected_flux, corrected_flux_err, color='k', marker='.', ls='', ecolor='k', label='Relative target flux (normalized)')
 			try:
 				ax5.set_ylim(l,h)
 			except:
@@ -2083,7 +2084,7 @@ def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad
             corr_fluxes[use_inds,i] = reg_flux
             w_new[i] = 1/(np.nanstd(reg_flux)**2)
             #w_new[i] = 1/(np.nanstd(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
-
+        
         w_new /= np.nansum(w_new)
         delta_weights = abs(w_old - w_new)
         w_old = w_new
@@ -2091,6 +2092,7 @@ def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad
         if count == iteration_limit:
             break 
 
+    w_crude = w_new 
     #Now determine which refs should be totally excluded based on the ratio of their measured/expected noise. 
     use_ref_inds = np.ones(n_refs,dtype='int')
     for i in range(n_refs):
@@ -2098,6 +2100,7 @@ def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad
         raw_flux = raw_fluxes[:,i]
         raw_flux_err = raw_flux_errs[:,i]
 
+        corr_flux = corr_flux[np.where(corr_flux!=0)]
         v, l, h = sigmaclip(corr_flux[~np.isnan(corr_flux)])
         use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
         norm = np.nanmean(raw_flux[use_inds])
@@ -2107,9 +2110,7 @@ def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad
         measured = np.nanstd(corr_flux[use_inds])
         if measured/expected > bad_ref_threshold:
             use_ref_inds[i] = 0
-        # if df['Target Source-Sky ADU'][0] == 315385.84375:
-        #     breakpoint()
-    
+
 	#Now do a more intensive loop with bad references given 0 weight. 
     w_old *= use_ref_inds
     w_old /= np.nansum(w_old)
