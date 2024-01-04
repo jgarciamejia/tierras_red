@@ -19,17 +19,6 @@ import matplotlib.pyplot as plt
 from imred import *
 
 import logging
-from ap_phot import set_tierras_permissions
-
-# def set_tierras_permissions(path): # copied from ap_phot.py
-# 	try:
-# 		os.chmod(path, stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR|stat.S_IRGRP|stat.S_IWGRP|stat.S_IXGRP|stat.S_IROTH|stat.S_IXOTH)
-# 		shutil.chown(path, user=None, group='exoplanet')
-# 	except:
-# 		print(f'Could not change permissions on {path}, returning.')
-# 	return 
-
-# updated DEC 12/2023
 
 def create_directories(basepath,date,target,folder1):
     datepath = os.path.join(basepath,date)
@@ -40,16 +29,13 @@ def create_directories(basepath,date,target,folder1):
         logging.info('Creating {} Directory'.format(datepath))
         os.system('mkdir {}'.format(datepath))
         os.system('chmod g+rwx {}'.format(datepath))
-        #set_tierras_permissions(datepath)
-    
+        
     if not os.path.exists(targetpath):
         logging.info('Creating {} Directory'.format(targetpath))
         os.system('mkdir {}'.format(targetpath))
         os.system('chmod g+rwx {}'.format(targetpath))
-        #set_tierras_permissions(targetpath)
         os.system('mkdir {}'.format(folder1path))
         os.system('chmod g+rwx {}'.format(folder1path))
-        #set_tierras_permissions(folder1path)
 
     return folder1path
 

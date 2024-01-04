@@ -1,13 +1,6 @@
-"""Ryan Cloutier's code to read TESS data.
-JGM modified path to be compatible with local machine"""
-
 from imports import *
 import os, requests
 from bs4 import BeautifulSoup
-
-# add path to use as outdir in JGM Mac
-path = '/Users/jgarciamejia/Downloads'
-
 
 def tic_data_url(ticid, sector):
     url = 'https://archive.stsci.edu/missions/tess/tid/s%.4d/'%sector
@@ -29,7 +22,7 @@ def listFD(url, ext=''):
 
 
 def download_dvs(ticid, sector, ext='dvm.pdf',
-                 outdir=path, opendvs=True):
+                 outdir='/Users/ryancloutier/Downloads', opendvs=True):
     '''Download the data summary report for a given TIC.'''
     url,_ = tic_data_url(ticid, sector)
     fs = listFD(url, ext=ext)
@@ -43,12 +36,12 @@ def download_dvs(ticid, sector, ext='dvm.pdf',
             os.system('open %s/%s'%(outdir, f.split('//')[-1]))
 
 
-def get_tess_LC(ticid, sector, outdir=path,
+def get_tess_LC(ticid, sector, outdir='/Users/ryancloutier/Downloads',
                 pltt=True, SAP=False):
     '''Download and return the light curve.'''
     url,_ = tic_data_url(ticid, sector)
     fs = listFD(url, ext='lc.fits')
-    print('URL (%s) contains %i 0light curve files.'%(url, len(fs)))
+    print('URL (%s) contains %i light curve files.'%(url, len(fs)))
     bjd, f, ef, sectors = np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0)
     for fi in fs:
         os.system('wget %s'%fi)

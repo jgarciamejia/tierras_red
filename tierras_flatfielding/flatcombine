@@ -46,13 +46,13 @@ def process_extension(imp):
     procimg = raw[trimsec[2]:trimsec[3],trimsec[0]:trimsec[1]] - biaslev
   else:
     procimg = raw - biaslev
+
   pdb.set_trace()
   skylev, skynoise = lfa.skylevel_image(procimg)
     
   return procimg / skylev, skylev, skynoise / skylev
 
 if __name__ == "__main__":
-  print ('new')
   try:
     warnings.simplefilter("ignore",
                           astropy.utils.exceptions.AstropyDeprecationWarning)
