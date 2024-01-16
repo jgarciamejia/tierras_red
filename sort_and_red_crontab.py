@@ -56,8 +56,8 @@ def get_target_list(datepath):
     target_list = set([flist[ind].split('.')[2] for ind in range(len(flist))])
     if 'FLAT001' in target_list:
         target_list = [targetname for targetname in target_list if not targetname.startswith('FLAT')]
-        print (target_list)
-        return target_list
+        #print (target_list)
+    return target_list
 
 def get_yday_date():
     # Get today's date
@@ -70,15 +70,23 @@ def get_yday_date():
     return formatted_date
 
 def main():
+
+    # Argparser for flatfielding (but note ffname is fixed)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-f", help="flat file with which to reduce data")
+    args = ap.parse_args()
+
     # Access observation info
     ffname = "flat0000" #eventually will have to upgrade to actually pass a flat file
     date = get_yday_date()
-    targets = get_target_list(date)
 
     # Define base paths    
     ipath = '/data/tierras/incoming'
     fpath = '/data/tierras/flattened'
     lcpath = '/data/tierras/lightcurves'
+
+    # Get target names observed
+    targets = get_target_list(os.path.join(ipath,date))
 
     for target in targets:
         # Create flattened file and light curve directories 
@@ -178,6 +186,8 @@ def main():
         histogram = os.path.join(ffolder,"{}.{}_astrom_hist.pdf".format(date,target))
         fig.savefig(histogram)
         logging.info('Saved two histograms summarizing the astrometric solution.')
+        logging.info('Data reduction for {} on {} done.'.format(target,date))
+        logging.info('Data reduction report sent to {}'.format(emails))
 
         # Send log file and STDRMS/NUMBRMS .pdf file to email
         subject = '[Tierras]_Data_Reduction_Report:{}_{}'.format(date,target)
@@ -185,10 +195,6 @@ def main():
         #append = '{}'.format(histogram)
         emails = 'juliana.garcia-mejia@cfa.harvard.edu patrick.tamburo@cfa.harvard.edu'
         os.system('echo | mutt {} -s {} -a {}'.format(emails,subject,append))
-
-        logging.info('Data reduction for {} on {} done.'.format(target,date))
-        logging.info('Data reduction report sent to {}'.format(emails))
-
 
 if __name__ == '__main__':
     main()
