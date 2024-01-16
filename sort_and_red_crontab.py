@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import logging
 import argparse 
 import numpy 
@@ -16,8 +14,6 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
 from imred import *
-
-import logging
 
 def create_directories(basepath,date,target,folder1):
     datepath = os.path.join(basepath,date)
@@ -187,7 +183,7 @@ def main():
         fig.savefig(histogram)
         logging.info('Saved two histograms summarizing the astrometric solution.')
         logging.info('Data reduction for {} on {} done.'.format(target,date))
-        logging.info('Data reduction report sent to {}'.format(emails))
+        logging.info('Data reduction report emailed')
 
         # Send log file and STDRMS/NUMBRMS .pdf file to email
         subject = '[Tierras]_Data_Reduction_Report:{}_{}'.format(date,target)
