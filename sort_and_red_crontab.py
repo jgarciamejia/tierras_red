@@ -38,15 +38,6 @@ def make_filelist(basepath,date,target):
     fullpath = os.path.join(basepath,date)
     return sorted([os.path.join(fullpath,f) for f in os.listdir(fullpath) if target+'.fit' in f])
 
-def count_files_in_folder(folder_path):
-    count = 0
-    items = os.listdir(folder_path)
-    for item in items:
-        item_path = os.path.join(folder_path, item)
-        if os.path.isfile(item_path):
-            count += 1
-    return count
-
 def get_target_list(datepath):
     flist = os.listdir(datepath)
     target_list = set([flist[ind].split('.')[2] for ind in range(len(flist))])
