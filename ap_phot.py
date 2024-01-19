@@ -592,7 +592,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 	SATURATION_THRESHOLD = 55000. #ADU
 	PLATE_SCALE = 0.43 #arcsec pix^-1, from Juliana's dissertation Table 1.1
 
-	centroid_mask_half_l = 7 #If centroiding is performed, a box of size 2*centroid_mask_half_l x 2*centroid_mask_half_l is used to mask out around the source's expected position (reduces chance of measuring a bad centroid)
+	centroid_mask_half_l = 8 #If centroiding is performed, a box of size 2*centroid_mask_half_l x 2*centroid_mask_half_l is used to mask out around the source's expected position (reduces chance of measuring a bad centroid)
 	
 	#If doing variable aperture photometry, read in FWHM X/Y data and set aperture radii 
 	if type == 'variable':
@@ -715,7 +715,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 	if live_plot:
 		#fig, ax = plt.subplots(2,2,figsize=(16,9))
 		ap_plot_ind = int(len(ap_radii)/2) #Set the central aperture as the one to plot
-		fig = plt.figure(figsize=(16,9))
+		fig = plt.figure(figsize=(13,7))
 		gs = gridspec.GridSpec(2,4,figure=fig)
 		ax1 = fig.add_subplot(gs[0,0:2])
 		ax2 = fig.add_subplot(gs[1,0])
@@ -937,7 +937,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 					ax3.axvline(bkg,color='k',lw=2)
 					ax3.set_xlabel('ADU')
 					#ax3.set_ylabel('N$_{pix}$')
-					ax3.legend()
+					#ax3.legend()
 					ax3.set_title('Background')
 					ax3.set_xscale('log')
 
@@ -1034,7 +1034,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 				ax4.set_ylim(l,h)
 			except:
 				print('')
-			ax4.legend() 
+			#ax4.legend() 
 
 			corrected_flux = targ_norm/alc_norm
 			corrected_flux_err = np.sqrt((targ_norm_err/alc_norm)**2+(targ_norm*alc_norm_err/(alc_norm**2))**2)
@@ -1044,7 +1044,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 				ax5.set_ylim(l,h)
 			except:
 				print('')
-			ax5.legend()
+			#ax5.legend()
 			#ax5.set_ylabel('Normalized Flux')
 			ax5.set_xlabel(f'Time - {int(bjd_tdb[0]):d}'+' (BJD$_{TDB}$)')
 			#plt.tight_layout()
@@ -1781,7 +1781,6 @@ def optimal_lc_chooser(date, target, ffname, overwrite=True, start_time=0, stop_
 			ax[-1].set_xlabel('Time (BJD$_{TDB}$)')
 			plt.tight_layout()
 			optimized_lc_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{date}_{target}_optimized_lc.png'
-			breakpoint()
 			plt.savefig(optimized_lc_path,dpi=300)
 			set_tierras_permissions(optimized_lc_path)
 		
@@ -1790,13 +1789,13 @@ def optimal_lc_chooser(date, target, ffname, overwrite=True, start_time=0, stop_
 			f.write(best_lc_path)
 		set_tierras_permissions(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt')
 		
-		#Save a .csv of the reference weights for the optimum light curve
-		ref_labels = [f'Ref {i+1}' for i in range(len(weights_save))]
-		weight_strs = [f'{val:.7f}' for val in weights_save]
-		weight_df = pd.DataFrame({'Reference':ref_labels,'Weight':weight_strs})
-		output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/night_weights.csv'
-		weight_df.to_csv(output_path,index=0)
-		set_tierras_permissions(output_path)
+		# #Save a .csv of the reference weights for the optimum light curve
+		# ref_labels = [f'Ref {i+1}' for i in range(len(weights_save))]
+		# weight_strs = [f'{val:.7f}' for val in weights_save]
+		# weight_df = pd.DataFrame({'Reference':ref_labels,'Weight':weight_strs})
+		# output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/night_weights.csv'
+		# weight_df.to_csv(output_path,index=0)
+		# set_tierras_permissions(output_path)
 		
 
 	return Path(best_lc_path)
@@ -1960,7 +1959,7 @@ def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 		lower_pix_bound = int(np.floor(np.min([stddev_x_75_pix,stddev_y_75_pix])*1.25))
 		if lower_pix_bound < 4: #ain't no way it's smaller than 4
 			lower_pix_bound = 4
-		upper_pix_bound = int(np.ceil(np.max([stddev_x_75_pix,stddev_y_75_pix])*3.5))
+		upper_pix_bound = int(np.ceil(np.max([stddev_x_75_pix,stddev_y_75_pix])*4.0))
 
 		aps_to_use = np.arange(lower_pix_bound, upper_pix_bound+1)
 
@@ -2442,6 +2441,22 @@ def lc_post_processing(date, target, ffname,overwrite=False):
 
 	return Path(best_lc_path)
 
+def make_data_dirs(date, target, ffname):
+	#Define base paths
+	global fpath, lcpath
+	lcpath = '/data/tierras/lightcurves'
+
+	if not os.path.exists(lcpath+f'/{date}'):
+		os.mkdir(lcpath+f'/{date}')
+		set_tierras_permissions(lcpath+f'/{date}')
+	if not os.path.exists(lcpath+f'/{date}/{target}'):
+		os.mkdir(lcpath+f'/{date}/{target}')
+		set_tierras_permissions(lcpath+f'/{date}/{target}')
+	if not os.path.exists(lcpath+f'/{date}/{target}/{ffname}'):
+		os.mkdir(lcpath+f'/{date}/{target}/{ffname}')
+		set_tierras_permissions(lcpath+f'/{date}/{target}/{ffname}')
+	return 
+
 def main(raw_args=None):
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-date", required=True, help="Date of observation in YYYYMMDD format.")
@@ -2456,7 +2471,6 @@ def main(raw_args=None):
 	ap.add_argument("-overwrite_refs",required=False,default=False,help="Whether or not to overwrite previous reference star output.",type=str)
 	ap.add_argument("-centroid",required=False,default=True,help="Whether or not to centroid during aperture photometry.",type=str)
 	ap.add_argument("-live_plot",required=False,default=True,help="Whether or not to plot the photometry as it is performed.",type=str)
-	ap.add_argument("-regress_flux",required=False,default=False,help="Whether or not to perform a regression of relative target flux against ancillary variables (airmass, x/y position, FWHM, etc.).",type=str)
 
 	args = ap.parse_args(raw_args)
 
@@ -2474,23 +2488,8 @@ def main(raw_args=None):
 	overwrite_refs = t_or_f(args.overwrite_refs)
 	centroid = t_or_f(args.centroid)
 	live_plot = t_or_f(args.live_plot)
-	regress_flux = t_or_f(args.regress_flux)
 
-	
-	
-	#Define base paths
-	global fpath, lcpath
-	lcpath = '/data/tierras/lightcurves'
-
-	if not os.path.exists(lcpath+f'/{date}'):
-		os.mkdir(lcpath+f'/{date}')
-		set_tierras_permissions(lcpath+f'/{date}')
-	if not os.path.exists(lcpath+f'/{date}/{target}'):
-		os.mkdir(lcpath+f'/{date}/{target}')
-		set_tierras_permissions(lcpath+f'/{date}/{target}')
-	if not os.path.exists(lcpath+f'/{date}/{target}/{ffname}'):
-		os.mkdir(lcpath+f'/{date}/{target}/{ffname}')
-		set_tierras_permissions(lcpath+f'/{date}/{target}/{ffname}')
+	make_data_dirs(date, target, ffname)
 
 	#Remove any bad images from the analysis
 	#exclude_files(date, target, ffname)
