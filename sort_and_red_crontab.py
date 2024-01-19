@@ -78,6 +78,8 @@ def main():
     targets = get_target_list(os.path.join(ipath,date))
 
     for target in targets:
+        if os.path.exists(os.path.join(fpath,date,target,ffname))
+            continue
         # Create flattened file and light curve directories 
         ffolder = create_directories(fpath,date,target,ffname)
 
