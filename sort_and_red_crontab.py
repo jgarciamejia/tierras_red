@@ -24,6 +24,7 @@ def create_directories(basepath,date,target,folder1):
         logging.info('Creating {} Directory'.format(datepath))
         os.system('mkdir {}'.format(datepath))
         os.system('chmod g+rwx {}'.format(datepath))
+        os.system('chmod g+rwx {}/*'.format(datepath))
         
     if not os.path.exists(targetpath):
         logging.info('Creating {} Directory'.format(targetpath))
@@ -31,6 +32,7 @@ def create_directories(basepath,date,target,folder1):
         os.system('chmod g+rwx {}'.format(targetpath))
         os.system('mkdir {}'.format(folder1path))
         os.system('chmod g+rwx {}'.format(folder1path))
+        os.system('chmod g+rwx {}/*'.format(folder1path))
 
     return folder1path
 
