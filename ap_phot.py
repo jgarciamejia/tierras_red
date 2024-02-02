@@ -23,6 +23,7 @@ from astropy.nddata import NDData
 import astropy.units as u 
 from astroquery.gaia import Gaia
 Gaia.MAIN_GAIA_TABLE = 'gaiadr3.gaia_source'
+from astroquery.vizier import Vizier
 from photutils import make_source_mask
 from photutils.detection import DAOStarFinder, IRAFStarFinder
 from photutils.psf import BasicPSFPhotometry, IntegratedGaussianPRF, DAOGroup, extract_stars, EPSFBuilder
@@ -277,7 +278,7 @@ def reference_star_chooser(file_list, target_position=(0,0), mode='automatic', p
 			refs = possible_refs[bydecflux[0:nrefs]]
 		else:
 			refs = possible_refs[bydecflux]
-    
+	
 		print("Selected {0:d} reference stars".format(len(refs)))
 
 		targ_and_refs = np.concatenate((targ, refs))
@@ -547,37 +548,37 @@ def align_and_stack_images(file_list, ref_image_buffer=10, n_ims_to_stack=20):
 	return stacked_hdu
 
 def jd_utc_to_bjd_tdb(jd_utc, ra, dec, location='Whipple'):
-    """Converts Julian Date in UTC timescale to Barycentric Julian Date in TDB timescale. 
+	"""Converts Julian Date in UTC timescale to Barycentric Julian Date in TDB timescale. 
 
-    :param jd_utc: julian date in utc
-    :type jd_utc: float
-    :param ra: the ra of the target as an hour angle (e.g., '23:06:30.0') or decimal degrees (e.g., 346.622013)
-    :type ra: str or float
-    :param dec: the dec of the target as a string (e.g, '-05:01:57') or decimal degrees (e.g., -5.041274)
-    :type dec: str or float
-    :param location: the site of observations, must match a location in the astropy .of_site json file, defaults to 'lowell'
-    :type location: str, optional
-    :return: time in bjd tdb
-    :rtype: float
-    """
+	:param jd_utc: julian date in utc
+	:type jd_utc: float
+	:param ra: the ra of the target as an hour angle (e.g., '23:06:30.0') or decimal degrees (e.g., 346.622013)
+	:type ra: str or float
+	:param dec: the dec of the target as a string (e.g, '-05:01:57') or decimal degrees (e.g., -5.041274)
+	:type dec: str or float
+	:param location: the site of observations, must match a location in the astropy .of_site json file, defaults to 'lowell'
+	:type location: str, optional
+	:return: time in bjd tdb
+	:rtype: float
+	"""
 
-    if type(ra) == str:
-        ra_unit = u.hourangle
-    elif type(ra) == np.float64:
-        ra_unit = u.deg
+	if type(ra) == str:
+		ra_unit = u.hourangle
+	elif type(ra) == np.float64:
+		ra_unit = u.deg
 
-    if location == 'Whipple':
-        #Specify the location of Whipple without needing to download the sites.json file.
-        #The values used are the geocentric coordinates of Whipple in meters, and I got them from:
-        #   coord.EarthLocation.of_site('Whipple')
-        site = coord.EarthLocation.from_geocentric(-1936768.8080869*u.m, -5077878.69513142*u.m, 3331595.44464286*u.m)
-    else:
-        site = coord.EarthLocation.of_site(location)
+	if location == 'Whipple':
+		#Specify the location of Whipple without needing to download the sites.json file.
+		#The values used are the geocentric coordinates of Whipple in meters, and I got them from:
+		#   coord.EarthLocation.of_site('Whipple')
+		site = coord.EarthLocation.from_geocentric(-1936768.8080869*u.m, -5077878.69513142*u.m, 3331595.44464286*u.m)
+	else:
+		site = coord.EarthLocation.of_site(location)
 
-    input_jd_utc = Time(jd_utc, format='jd', scale='utc', location=site)
-    target = coord.SkyCoord(ra, dec, unit=(ra_unit, u.deg), frame='icrs')
-    ltt_bary = input_jd_utc.light_travel_time(target)
-    return (input_jd_utc.tdb + ltt_bary).value
+	input_jd_utc = Time(jd_utc, format='jd', scale='utc', location=site)
+	target = coord.SkyCoord(ra, dec, unit=(ra_unit, u.deg), frame='icrs')
+	ltt_bary = input_jd_utc.light_travel_time(target)
+	return (input_jd_utc.tdb + ltt_bary).value
 
 def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, an_out=60, centroid=False, live_plot=False, type='fixed'):
 
@@ -592,7 +593,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 	SATURATION_THRESHOLD = 55000. #ADU
 	PLATE_SCALE = 0.43 #arcsec pix^-1, from Juliana's dissertation Table 1.1
 
-	centroid_mask_half_l = 8 #If centroiding is performed, a box of size 2*centroid_mask_half_l x 2*centroid_mask_half_l is used to mask out around the source's expected position (reduces chance of measuring a bad centroid)
+	centroid_mask_half_l = 11 #If centroiding is performed, a box of size 2*centroid_mask_half_l x 2*centroid_mask_half_l is used to mask out around the source's expected position (reduces chance of measuring a bad centroid)
 	
 	#If doing variable aperture photometry, read in FWHM X/Y data and set aperture radii 
 	if type == 'variable':
@@ -851,7 +852,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 				if (abs(x_pos_cutout_centroid-x_mid) < centroid_mask_half_l) and (abs(y_pos_cutout_centroid-y_mid) < centroid_mask_half_l):
 					x_pos_cutout = x_pos_cutout_centroid
 					y_pos_cutout = y_pos_cutout_centroid
-				
+							
 				#Update position in full image using measured centroid
 				x_pos_image = x_pos_cutout + int(x_pos_image) - an_out
 				y_pos_image = y_pos_cutout + int(y_pos_image) - an_out
@@ -1601,6 +1602,7 @@ def plot_raw_fluxes(lc_path):
 	output_path = lc_path.parent/f'{date}_{target}_raw_flux.png'
 	plt.savefig(output_path,dpi=300)
 	set_tierras_permissions(output_path)
+	plt.close()
 
 	return 
 
@@ -1628,22 +1630,22 @@ def tierras_binner(t, y, bin_mins=15):
 	
 
 def tierras_binner_inds(t, bin_mins=15):
-    x_offset = t[0]
-    t = t - x_offset
-    t = t*24*60
-    n_bins = int(np.ceil(t[-1]/bin_mins))
-    bin_inds = []
-    for i in range(n_bins):
-        if i == n_bins-1:
-            time_start = i*bin_mins
-            time_end = t[-1]+1
-        else:
-            time_start = i*bin_mins
-            time_end = (i+1)*bin_mins
-        bin_inds.append(np.where((t>=time_start)&(t<time_end))[0])
-      
-    
-    return bin_inds
+	x_offset = t[0]
+	t = t - x_offset
+	t = t*24*60
+	n_bins = int(np.ceil(t[-1]/bin_mins))
+	bin_inds = []
+	for i in range(n_bins):
+		if i == n_bins-1:
+			time_start = i*bin_mins
+			time_end = t[-1]+1
+		else:
+			time_start = i*bin_mins
+			time_end = (i+1)*bin_mins
+		bin_inds.append(np.where((t>=time_start)&(t<time_end))[0])
+	  
+	
+	return bin_inds
 
 def plot_ref_positions(file_list, targ_and_refs):
 	im = fits.open(file_list[5])[0].data
@@ -1655,36 +1657,36 @@ def plot_ref_positions(file_list, targ_and_refs):
 	return 
 
 def juliana_binning(binsize, times, flux, flux_err):
-    '''Bins up a Tierras light curve following example from testextract.py 
+	'''Bins up a Tierras light curve following example from testextract.py 
 
-    times: array of times in days
-    
-    '''
-    std = np.empty([len(binsize)+1])
-    decstd = np.empty([len(binsize)+1])
-    theo = np.empty([len(binsize)+1])
+	times: array of times in days
+	
+	'''
+	std = np.empty([len(binsize)+1])
+	decstd = np.empty([len(binsize)+1])
+	theo = np.empty([len(binsize)+1])
 
-    for ibinsize, thisbinsize in enumerate(binsize):
+	for ibinsize, thisbinsize in enumerate(binsize):
 
-        nbin = (times[-1] - times[0]) * 1440.0 / thisbinsize
+		nbin = (times[-1] - times[0]) * 1440.0 / thisbinsize
 
-        bins = times[0] + thisbinsize * np.arange(nbin+1) / 1440.0
-        
-        wt = 1.0 / np.square(flux_err)
-        
-        ybn = np.histogram(times, bins=bins, weights=flux*wt)[0]
-        #ybnd = np.histogram(times, bins=bins, weights=decflux*wt)[0]
-        ybd = np.histogram(times, bins=bins, weights=wt)[0]
-        
-        wb = ybd > 0
-        
-        binned_flux = ybn[wb] / ybd[wb]
-        #binned_decflux = ybnd[wb] / ybd[wb]
+		bins = times[0] + thisbinsize * np.arange(nbin+1) / 1440.0
+		
+		wt = 1.0 / np.square(flux_err)
+		
+		ybn = np.histogram(times, bins=bins, weights=flux*wt)[0]
+		#ybnd = np.histogram(times, bins=bins, weights=decflux*wt)[0]
+		ybd = np.histogram(times, bins=bins, weights=wt)[0]
+		
+		wb = ybd > 0
+		
+		binned_flux = ybn[wb] / ybd[wb]
+		#binned_decflux = ybnd[wb] / ybd[wb]
 
-        std[ibinsize+1] = np.std(binned_flux)
-        #decstd[ibinsize+1] = np.std(binned_decflux)
-        theo[ibinsize+1] = np.sqrt(np.mean(1.0 / ybd[wb]))
-    return std, theo
+		std[ibinsize+1] = np.std(binned_flux)
+		#decstd[ibinsize+1] = np.std(binned_decflux)
+		theo[ibinsize+1] = np.sqrt(np.mean(1.0 / ybd[wb]))
+	return std, theo
 
 def transit_model(times, T0,P,Rp,a,inc,ecc,w,u1,u2):
 	params = batman.TransitParams()
@@ -1701,7 +1703,7 @@ def transit_model(times, T0,P,Rp,a,inc,ecc,w,u1,u2):
 	return m.light_curve(params)
 
 def moving_average(x, w):
-    return np.convolve(x, np.ones(w), 'same') / w
+	return np.convolve(x, np.ones(w), 'same') / w
 
 def optimal_lc_chooser(date, target, ffname, overwrite=True, start_time=0, stop_time=0, plot=False):
 	optimum_lc_file = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt'
@@ -2022,7 +2024,7 @@ def set_tierras_permissions(path):
 def get_lunar_distance(ra, dec, time):
 	astropy_time = Time(time, format='jd', scale='tdb')
 	field_coord = SkyCoord(ra,dec, unit=(u.hourangle, u.deg))
-	moon_coord = get_moon(astropy_time, location=coord.EarthLocation.of_site('Whipple'))
+	moon_coord = get_moon(astropy_time,location=coord.EarthLocation.of_site('Whipple'))
 	return field_coord.separation(moon_coord).value
 
 def t_or_f(arg):
@@ -2035,122 +2037,122 @@ def t_or_f(arg):
 		print(f'ERROR: check passed argument for {arg}.')
 
 def tierras_ref_weighting(df, crude_convergence=1e-4, fine_convergence=1e-6, bad_ref_threshold=10, iteration_limit=100, plots=False):
-    '''Based off the PINES algorithm, but entirely de-weights references if they have measured noise that is bad_ref_threshold times higher than their expected noise.
-    '''
-    #times = np.array(df['BJD TDB'])
-    x = np.array(df['Target X'])
-    y = np.array(df['Target Y'])
-    fwhm_x = np.array(df['Target X FWHM Arcsec'])
-    fwhm_y = np.array(df['Target Y FWHM Arcsec'])
-    airmass = np.array(df['Airmass'])
+	'''Based off the PINES algorithm, but entirely de-weights references if they have measured noise that is bad_ref_threshold times higher than their expected noise.
+	'''
+	#times = np.array(df['BJD TDB'])
+	x = np.array(df['Target X'])
+	y = np.array(df['Target Y'])
+	fwhm_x = np.array(df['Target X FWHM Arcsec'])
+	fwhm_y = np.array(df['Target Y FWHM Arcsec'])
+	airmass = np.array(df['Airmass'])
 	
-    n_refs = int(df.keys()[-1].split('Ref ')[1].split(' ')[0])
-    ref_inds = np.arange(n_refs)
-    n_ims = len(df)
-    raw_fluxes = np.zeros((n_ims,n_refs))
-    raw_flux_errs = np.zeros((n_ims,n_refs))
-    for i in range(n_refs):
-        raw_fluxes[:,i] = np.array(df[f'Ref {i+1} Source-Sky ADU'])
-        raw_flux_errs[:,i] = np.array(df[f'Ref {i+1} Source-Sky Error ADU'])
+	n_refs = int(df.keys()[-1].split('Ref ')[1].split(' ')[0])
+	ref_inds = np.arange(n_refs)
+	n_ims = len(df)
+	raw_fluxes = np.zeros((n_ims,n_refs))
+	raw_flux_errs = np.zeros((n_ims,n_refs))
+	for i in range(n_refs):
+		raw_fluxes[:,i] = np.array(df[f'Ref {i+1} Source-Sky ADU'])
+		raw_flux_errs[:,i] = np.array(df[f'Ref {i+1} Source-Sky Error ADU'])
 	
-    w_var = np.nanmean(raw_flux_errs,axis=0)**2 #Set initial weights using calculated uncertainties
-    w_var /= np.nansum(w_var)
+	w_var = np.nanmean(raw_flux_errs,axis=0)**2 #Set initial weights using calculated uncertainties
+	w_var /= np.nansum(w_var)
 
-    #Do a 'crude' loop to first figure out which refs should be totally tossed out
-    corr_fluxes = np.zeros((n_ims,n_refs))
-    w_old = copy.deepcopy(w_var)
-    delta_weights = np.ones(n_refs)
-    count = 0 
-    while sum(delta_weights>crude_convergence)>0:
-        #print(f'{count+1}')
-        w_new = np.zeros(n_refs)
-        for i in range(n_refs):
-            salc_inds = np.delete(ref_inds, i) #Create a "special" ALC for this reference, using the fluxes of all OTHER reference stars. This is the main difference between the SPECULOOS and PINES algorithms. 
-            salc_fluxes = raw_fluxes[:,salc_inds]
-            w_salc = w_old[salc_inds]
-            w_salc /= np.nansum(w_salc) #renormalize
-            salc = np.nansum(w_salc*salc_fluxes,axis=1)
+	#Do a 'crude' loop to first figure out which refs should be totally tossed out
+	corr_fluxes = np.zeros((n_ims,n_refs))
+	w_old = copy.deepcopy(w_var)
+	delta_weights = np.ones(n_refs)
+	count = 0 
+	while sum(delta_weights>crude_convergence)>0:
+		#print(f'{count+1}')
+		w_new = np.zeros(n_refs)
+		for i in range(n_refs):
+			salc_inds = np.delete(ref_inds, i) #Create a "special" ALC for this reference, using the fluxes of all OTHER reference stars. This is the main difference between the SPECULOOS and PINES algorithms. 
+			salc_fluxes = raw_fluxes[:,salc_inds]
+			w_salc = w_old[salc_inds]
+			w_salc /= np.nansum(w_salc) #renormalize
+			salc = np.nansum(w_salc*salc_fluxes,axis=1)
 
-            corr_flux = raw_fluxes[:,i]/salc #Correct using the salc
-            corr_flux /= np.nanmean(corr_flux) 
-            #corr_fluxes[:,i] = corr_flux
-            v, l, h = sigmaclip(corr_flux[~np.isnan(corr_flux)])
-            use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
-            
-            #NEW BIT: do a regression against ancillary variables and THEN measure weight
-            ancillary_dict = {'X':x[use_inds], 'Y':y[use_inds], 'FWHM X':fwhm_x[use_inds], 'FWHM Y':fwhm_y[use_inds], 'Airmass':airmass[use_inds]}
-            reg_flux, intercept, coeffs, regress_dict = regression(corr_flux[use_inds],ancillary_dict)
-            corr_fluxes[use_inds,i] = reg_flux
-            w_new[i] = 1/(np.nanstd(reg_flux)**2)
-            #w_new[i] = 1/(np.nanstd(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
-        
-        w_new /= np.nansum(w_new)
-        delta_weights = abs(w_old - w_new)
-        w_old = w_new
-        count += 1
-        if count == iteration_limit:
-            break 
+			corr_flux = raw_fluxes[:,i]/salc #Correct using the salc
+			corr_flux /= np.nanmean(corr_flux) 
+			#corr_fluxes[:,i] = corr_flux
+			v, l, h = sigmaclip(corr_flux[~np.isnan(corr_flux)])
+			use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
+			
+			#NEW BIT: do a regression against ancillary variables and THEN measure weight
+			ancillary_dict = {'X':x[use_inds], 'Y':y[use_inds], 'FWHM X':fwhm_x[use_inds], 'FWHM Y':fwhm_y[use_inds], 'Airmass':airmass[use_inds]}
+			reg_flux, intercept, coeffs, regress_dict = regression(corr_flux[use_inds],ancillary_dict)
+			corr_fluxes[use_inds,i] = reg_flux
+			w_new[i] = 1/(np.nanstd(reg_flux)**2)
+			#w_new[i] = 1/(np.nanstd(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
+		
+		w_new /= np.nansum(w_new)
+		delta_weights = abs(w_old - w_new)
+		w_old = w_new
+		count += 1
+		if count == iteration_limit:
+			break 
 
-    w_crude = w_new 
-    #Now determine which refs should be totally excluded based on the ratio of their measured/expected noise. 
-    use_ref_inds = np.ones(n_refs,dtype='int')
-    for i in range(n_refs):
-        corr_flux = corr_fluxes[:,i]
-        raw_flux = raw_fluxes[:,i]
-        raw_flux_err = raw_flux_errs[:,i]
+	w_crude = w_new 
+	#Now determine which refs should be totally excluded based on the ratio of their measured/expected noise. 
+	use_ref_inds = np.ones(n_refs,dtype='int')
+	for i in range(n_refs):
+		corr_flux = corr_fluxes[:,i]
+		raw_flux = raw_fluxes[:,i]
+		raw_flux_err = raw_flux_errs[:,i]
 
-        corr_flux = corr_flux[np.where(corr_flux!=0)]
-        v, l, h = sigmaclip(corr_flux[~np.isnan(corr_flux)])
-        use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
-        norm = np.nanmean(raw_flux[use_inds])
-        #raw_flux_norm = raw_flux/norm 
-        raw_flux_err_norm = raw_flux_err/norm
-        expected = np.nanmean(raw_flux_err_norm)
-        measured = np.nanstd(corr_flux[use_inds])
-        if measured/expected > bad_ref_threshold:
-            use_ref_inds[i] = 0
+		corr_flux = corr_flux[np.where(corr_flux!=0)]
+		v, l, h = sigmaclip(corr_flux[~np.isnan(corr_flux)])
+		use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
+		norm = np.nanmean(raw_flux[use_inds])
+		#raw_flux_norm = raw_flux/norm 
+		raw_flux_err_norm = raw_flux_err/norm
+		expected = np.nanmean(raw_flux_err_norm)
+		measured = np.nanstd(corr_flux[use_inds])
+		if measured/expected > bad_ref_threshold:
+			use_ref_inds[i] = 0
 
 	#Now do a more intensive loop with bad references given 0 weight. 
-    w_old *= use_ref_inds
-    w_old /= np.nansum(w_old)
-    corr_fluxes = np.zeros((n_ims,n_refs))
-    delta_weights = np.ones(n_refs)
-    count = 0 
-    while sum(delta_weights>fine_convergence)>0:
-        #print(f'{count+1}')
-        w_new = np.zeros(n_refs)
-        for i in range(n_refs):
-            if use_ref_inds[i] == 0: #Don't bother optimizing on bad refs 
-               continue 
-            salc_inds = np.delete(ref_inds, i) #Create a "special" ALC for this reference, using the fluxes of all OTHER reference stars. This is the main difference between the SPECULOOS and PINES algorithms. 
-            salc_fluxes = raw_fluxes[:,salc_inds]
-            w_salc = w_old[salc_inds]
-            w_salc /= np.nansum(w_salc) #renormalize
-            salc = np.nansum(w_salc*salc_fluxes,axis=1)
+	w_old *= use_ref_inds
+	w_old /= np.nansum(w_old)
+	corr_fluxes = np.zeros((n_ims,n_refs))
+	delta_weights = np.ones(n_refs)
+	count = 0 
+	while sum(delta_weights>fine_convergence)>0:
+		#print(f'{count+1}')
+		w_new = np.zeros(n_refs)
+		for i in range(n_refs):
+			if use_ref_inds[i] == 0: #Don't bother optimizing on bad refs 
+			   continue 
+			salc_inds = np.delete(ref_inds, i) #Create a "special" ALC for this reference, using the fluxes of all OTHER reference stars. This is the main difference between the SPECULOOS and PINES algorithms. 
+			salc_fluxes = raw_fluxes[:,salc_inds]
+			w_salc = w_old[salc_inds]
+			w_salc /= np.nansum(w_salc) #renormalize
+			salc = np.nansum(w_salc*salc_fluxes,axis=1)
 
-            corr_flux = raw_fluxes[:,i]/salc #Correct using the salc
-            corr_flux /= np.nanmean(corr_flux) 
-            #corr_fluxes[:,i] = corr_flux
-            v, l, h = sigmaclip(corr_flux[~np.isnan(corr_flux)])
-            use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
+			corr_flux = raw_fluxes[:,i]/salc #Correct using the salc
+			corr_flux /= np.nanmean(corr_flux) 
+			#corr_fluxes[:,i] = corr_flux
+			v, l, h = sigmaclip(corr_flux[~np.isnan(corr_flux)])
+			use_inds = np.where((corr_flux>l)&(corr_flux<h))[0]
 			
-            #NEW BIT: do a regression against ancillary variables and THEN measure weight
-            ancillary_dict = {'X':x[use_inds], 'Y':y[use_inds], 'FWHM X':fwhm_x[use_inds], 'FWHM Y':fwhm_y[use_inds], 'Airmass':airmass[use_inds]}
-            reg_flux, intercept, coeffs, regress_dict = regression(corr_flux[use_inds],ancillary_dict)
-            w_new[i] = 1/(np.nanstd(reg_flux)**2)
-            #w_new[i] = 1/(np.nanstd(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
-        
-        w_new /= np.nansum(w_new)
-        delta_weights = abs(w_old - w_new)
-        w_old = w_new
-        count += 1
-        if count == iteration_limit:
-            break
-    alc = np.nansum(w_new*raw_fluxes,axis=1)
-    alc_err = np.sqrt(np.nansum((w_new*raw_flux_errs)**2,axis=1))
-    if len(np.where(alc == 0)[0]) == len(alc):
-        breakpoint()
-    return w_new, alc, alc_err
+			#NEW BIT: do a regression against ancillary variables and THEN measure weight
+			ancillary_dict = {'X':x[use_inds], 'Y':y[use_inds], 'FWHM X':fwhm_x[use_inds], 'FWHM Y':fwhm_y[use_inds], 'Airmass':airmass[use_inds]}
+			reg_flux, intercept, coeffs, regress_dict = regression(corr_flux[use_inds],ancillary_dict)
+			w_new[i] = 1/(np.nanstd(reg_flux)**2)
+			#w_new[i] = 1/(np.nanstd(corr_flux[use_inds])**2) #Set new weight using measured standard deviation of corrected flux
+		
+		w_new /= np.nansum(w_new)
+		delta_weights = abs(w_old - w_new)
+		w_old = w_new
+		count += 1
+		if count == iteration_limit:
+			break
+	alc = np.nansum(w_new*raw_fluxes,axis=1)
+	alc_err = np.sqrt(np.nansum((w_new*raw_flux_errs)**2,axis=1))
+	if len(np.where(alc == 0)[0]) == len(alc):
+		breakpoint()
+	return w_new, alc, alc_err
 
 def weighted_alc(lc_path):
 	lc_path = Path(lc_path)
