@@ -90,7 +90,7 @@ def make_global_lists(mainpath,targetname,ffname,exclude_dates=[], ap_radius='op
 	bjd_save = []
 	lcfolderlist = np.sort(glob(mainpath+"/**/"+target))
 	lcdatelist = [lcfolderlist[ind].split("/")[4] for ind in range(len(lcfolderlist))] 
-
+	breakpoint()
 	for ii,lcfolder in enumerate(lcfolderlist):
 		print("Processing", lcdatelist[ii])
 

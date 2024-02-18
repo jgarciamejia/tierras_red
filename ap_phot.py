@@ -1147,6 +1147,22 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 		output_header.append('Sky Temperature')
 		#output_list.append([f'{val:.5f}' for val in lunar_distance])
 		#output_header.append('Lunar Distance')
+		output_list.append([f'{val:.1f}' for val in pressures])
+		output_header.append('Pressure')
+		output_list.append([f'{val:.1f}' for val in return_pressures])
+		output_header.append('Return Pressure')
+		output_list.append([f'{val:.1f}' for val in supply_pressures])
+		output_header.append('Supply Pressure')
+		output_list.append([f'{val:.2f}' for val in hour_angles])
+		output_header.append('Hour Angle')
+		output_list.append([f'{val:.2f}' for val in dome_azimuths])
+		output_header.append('Dome Azimuth')
+		output_list.append([f'{val:.2f}' for val in wind_speeds])
+		output_header.append('Wind Speed')
+		output_list.append([f'{val:.2f}' for val in wind_gusts])
+		output_header.append('Wind Gust')
+		output_list.append([f'{val:.1f}' for val in wind_dirs])
+		output_header.append('Wind Direction')
 
 		for j in range(len(targ_and_refs)):
 			if j == 0:
