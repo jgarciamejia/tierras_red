@@ -644,6 +644,15 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 	humidities = np.zeros(len(file_list),dtype='float16')
 	dewpoints = np.zeros(len(file_list),dtype='float16')
 	sky_temps = np.zeros(len(file_list),dtype='float16')
+	pressures = np.zeros(len(file_list),dtype='float16')
+	return_pressures = np.zeros(len(file_list),dtype='float16')
+	supply_pressures = np.zeros(len(file_list),dtype='float16')
+	hour_angles = np.zeros(len(file_list),dtype='float16')
+	dome_azimuths = np.zeros(len(file_list),dtype='float16')
+	wind_speeds = np.zeros(len(file_list),dtype='float16')
+	wind_gusts = np.zeros(len(file_list),dtype='float16')
+	wind_dirs = np.zeros(len(file_list),dtype='float16')
+
 	loop_times = np.zeros(len(file_list),dtype='float16')
 	#lunar_distance = np.zeros(len(file_list),dtype='float16')
 	
@@ -751,6 +760,13 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 		ccd_temps[i] = source_header['CCDTEMP']
 		exp_times[i] = source_header['EXPTIME']
 		focuses[i] = source_header['FOCUS']
+		ha_str = source_header['HA']
+		if ha_str[0] == '-':
+			ha_decimal = int(ha_str.split(':')[0]) - int(ha_str.split(':')[1])/60 - float(ha_str.split(':')[2])/3600
+		else:
+			ha_decimal = int(ha_str.split(':')[0]) + int(ha_str.split(':')[1])/60 + float(ha_str.split(':')[2])/3600
+		hour_angles[i] = ha_decimal
+
 		#These keywords are sometimes missing
 		try:
 			dome_humidities[i] = source_header['DOMEHUMI']
@@ -765,6 +781,13 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			temps[i] = source_header['TEMPERAT']
 			humidities[i] = source_header['HUMIDITY']
 			sky_temps[i] = source_header['SKYTEMP']
+			pressures[i] = source_header['PRESSURE']
+			return_pressures[i] = source_header['PSPRES1']
+			supply_pressures[i] = source_header['PSPRES2']
+			dome_azimuths[i] = source_header['DOMEAZ']
+			wind_speeds[i] = source_header['WINDSPD']
+			wind_gusts[i] = source_header['WINDGUST']
+			wind_dirs[i] = source_header['WINDDIR']
 		except:
 			dome_humidities[i] = np.nan
 			dome_temps[i] = np.nan
@@ -778,6 +801,13 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			temps[i] = np.nan
 			humidities[i] = np.nan
 			sky_temps[i] = np.nan
+			pressures[i] = np.nan
+			return_pressures[i] = np.nan
+			supply_pressures[i] = np.nan
+			dome_azimuths[i] = np.nan
+			wind_speeds[i] = np.nan
+			wind_gusts[i] = np.nan
+			wind_dirs[i] = np.nan
 
 		#lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary
 		
