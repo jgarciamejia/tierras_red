@@ -138,276 +138,256 @@ def plot_image(data,use_wcs=False,cmap_name='viridis'):
 	plt.tight_layout()
 	return fig, ax
 
-def reference_star_chooser(file_list, target_position=(0,0), mode='automatic', plot=False, overwrite=False, nonlinear_limit=40000, dimness_limit=0.05, nearness_limit=15, edge_limit=50, targ_distance_limit=4000, nrefs=1000):
+def reference_star_chooser(file_list, target_position=(0,0), plot=True, overwrite=False, dimness_limit=0.01, nearness_limit=15, edge_limit=40, targ_distance_limit=4000):	
 	'''
-		PURPOSE: 
-			Does a quick plot of a Tierras image (or any 2D array)
-		INPUTS:
-			data (2D array): array of data to be plotted 
-			use_wcs (bool): whether or not to plot using WCS coordinates instead of pixel (TODO: this is currently broken)
-			cmap_name (str): the name of whatever pyplot colormap you want to use
+		PURPOSE: select suitable reference stars for a Tierras target using Gaia
+		INPUTS: 
+			file_list (array): list of paths to Tierras images. If no existing stacked image exists in the /data/tierras/targets/{field} directory, one will be made using images from this list
+
+			target_position (tuple, optional): the user-specified target pixel position. If (0,0), the code will use the RA/Dec coordinates of the target in the header of the stacked field image and the associated WCS to estimate its position. 
+
+			plot (bool, optional): whether or not to produce/save plots of the selected reference stars in the field and a color-magnitude diagram
+
+			overwrite (bool, optional): whether or not to restore previously saved output from the /data/tierras/targets/{field}/ directory
+
+			dimness_limit (float, optional): the minimum mean flux ratio in Gaia Rp-band that a candidate reference can have to the target and still be retained as a reference
+
+			nearness_limit (float, optional): the minimum distance (in pixels) that a candidate reference star must be from all other sources to still be retained as a reference
+
+			edge_limit (float, optional): the minimum distance (in pixels) that a candidate reference star can be from the edge of the detector and still be retained as a reference
+
+			targ_distance_limit (float, optional): the maximum distance (in pixels) that a candidate reference star can be from the target and still be retained as a reference
+		
 		OUTPUTS:
-			fig, ax (matplotlib objects): the figure/axis objects associated with the plot
+			output_df (pandas DataFrame): a data frame containing the target and reference stars, with the target as the first entry
 
 	'''
-	target = file_list[0].parent.parent.name
+
+	field = file_list[0].parent.parent.name
 
 	#Start by checking for existing csv file about target/reference positions
-	reference_file_path = Path('/data/tierras/targets/'+target+'/'+target+'_target_and_ref_stars.csv')
+	reference_file_path = Path('/data/tierras/targets/'+field+'/'+field+'_target_and_ref_stars.csv')
 	if (reference_file_path.exists() == False) or (overwrite==True):
 		print('No saved target/reference star positions found!\n')
 		if not reference_file_path.parent.exists():
 			os.mkdir(reference_file_path.parent)
 			set_tierras_permissions(reference_file_path.parent)
-		
-		stacked_image_path = reference_file_path.parent/(target+'_stacked_image.fits')
+
+		stacked_image_path = reference_file_path.parent/(field+'_stacked_image.fits')
 		if not stacked_image_path.exists():
 			print('No stacked field image found!')
 			stacked_hdu = align_and_stack_images(file_list)
-			stacked_image_path = Path('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')
+			stacked_image_path = Path('/data/tierras/targets/'+field+'/'+field+'_stacked_image.fits')
 			stacked_hdu.writeto(stacked_image_path, overwrite=True)
 			set_tierras_permissions(stacked_image_path)
 			print(f"Saved stacked field to {stacked_image_path}")
 		else:
 			print(f'Restoring stacked field image from {stacked_image_path}.')
-		
-		stacked_image_hdu = fits.open(stacked_image_path)[0]
-		stacked_image = stacked_image_hdu.data
-		stacked_image_header = stacked_image_hdu.header
-		#Get the number of images that were stacked in the stacked image
-		n_stacked_images = int(stacked_image_header['COMMENT'][-1].split('image ')[1].split(':')[0])+1
-		wcs = WCS(stacked_image_header)
-
-		#Do SEP detection on stacked image 
-		bpm = load_bad_pixel_mask()
-		#Add some extra masking to deal with image stacking effects. 
-		
-		#Extra masking on bad columns
-		bpm[0:1032, 1431:1472] = True
-		bpm[1023:, 1771:1813]  = True
-
-		#Extra masking on divide between top/bottom detectors 
-		bpm[1009:1042,:] = True
-
-		#25-pixel mask on all edges
-		bpm[:, 0:25+1] = True
-		bpm[:,4096-1-25:] = True
-		bpm[0:25+1,:] = True
-		bpm[2048-1-25:,:] = True
-		# plot_image(bpm)
-		# breakpoint()
-
-		#Do SEP source detection on background-subtracted stacked image.
-		thresh = 2.0
-		minpix = 4
-		try:
-			bkg_stack = sep.Background(stacked_image)
-		except:
-			bkg_stack = sep.Background(stacked_image.byteswap().newbyteorder())
-
-		objs_stack = sep.extract(stacked_image-bkg_stack, thresh, err=bkg_stack.globalrms, mask=bpm, minarea=minpix)
-		
-		#Write all object detections out to csv file
-		df = pd.DataFrame(objs_stack)
-		output_path = reference_file_path.parent/(target+'_stacked_source_detections.csv')
-		try:
-			df.to_csv(output_path, index=False)
-		except:
-			print('Could not write out stacked source detections .csv, skippping!')
-		set_tierras_permissions(output_path)
-
-		#Figure out where the target is 
-		if target_position[0] != 0 and target_position[1] != 0:
-			xtarg = target_position[0]
-			ytarg = target_position[1]
-		else:
-			#If no target position passed, estimate from header
-			catra = stacked_image_header['CAT-RA']
-			catde = stacked_image_header['CAT-DEC']
-			cateq = float(stacked_image_header['CAT-EQUI'])
-			if cateq == 0:
-				raise RuntimeError('Target position is not set!')
-
-			ratarg, rv = lfa.base60_to_10(catra, ":", lfa.UNIT_HR, lfa.UNIT_RAD)
-			detarg, rv = lfa.base60_to_10(catde, ":", lfa.UNIT_DEG, lfa.UNIT_RAD)
-
-			xtarg, ytarg = wcs.all_world2pix(ratarg * lfa.RAD_TO_DEG,detarg * lfa.RAD_TO_DEG, 1)
-		
-		itarg = np.argmin(np.hypot(objs_stack["x"]+1-xtarg, objs_stack["y"]+1-ytarg))
-		targ = objs_stack[[itarg]]
-
-		#Identify suitable reference stars
-		#TODO: 40000*number of stacked images is an estimate, can we be more exact?
-		possible_ref_inds = np.where((objs_stack['peak']<nonlinear_limit*n_stacked_images)&(objs_stack['flux']>targ['flux']*dimness_limit))[0]
-		if itarg in possible_ref_inds:
-			possible_ref_inds = np.delete(possible_ref_inds, np.where(possible_ref_inds == itarg)[0][0])
-		
-		#Remove refs that are too close to other sources (dist < nearness_limit pix)
-		refs_to_remove = []
-		for i in range(len(possible_ref_inds)):
-			dists = np.hypot(objs_stack['x']-objs_stack[possible_ref_inds[i]]['x'], objs_stack['y']-objs_stack[possible_ref_inds[i]]['y'])
-			dists = np.delete(dists,possible_ref_inds[i]) #Remove the source itself from the distance calculation
-			close_sources = np.where(dists < nearness_limit)[0]
-			if len(close_sources) > 0:
-				refs_to_remove.append(possible_ref_inds[i])
-		for i in range(len(refs_to_remove)):
-			possible_ref_inds = np.delete(possible_ref_inds, np.where(possible_ref_inds == refs_to_remove[i])[0][0])	
-		possible_refs = objs_stack[possible_ref_inds]
-		
-		#Remove refs that are within edge_limit pixels of the detector edge 
-		refs_to_remove = []
-		for i in range(len(possible_ref_inds)):
-			possible_ref_x = objs_stack[possible_ref_inds[i]]['x']
-			possible_ref_y = objs_stack[possible_ref_inds[i]]['y']
-			if (possible_ref_x < edge_limit) | (possible_ref_y < edge_limit) | (possible_ref_x > np.shape(stacked_image)[1]-edge_limit) | (possible_ref_y > np.shape(stacked_image)[0]-edge_limit):
-				refs_to_remove.append(possible_ref_inds[i])
-		for i in range(len(refs_to_remove)):
-			possible_ref_inds = np.delete(possible_ref_inds, np.where(possible_ref_inds == refs_to_remove[i])[0][0])
-		possible_refs = objs_stack[possible_ref_inds]
-
-		#Remove refs that are more than targ_distance_limit away from the target
-		dists = np.sqrt((objs_stack['x'][possible_ref_inds]-xtarg)**2+(objs_stack['y'][possible_ref_inds]-ytarg)**2)
-		refs_to_remove = possible_ref_inds[np.where(dists>targ_distance_limit)[0]]
-		for i in range(len(refs_to_remove)):
-			possible_ref_inds = np.delete(possible_ref_inds, np.where(possible_ref_inds == refs_to_remove[i])[0][0])
-		possible_refs = objs_stack[possible_ref_inds]
-
-		#Select up to nrefs of the remaining reference stars sorted by flux
-		bydecflux = np.argsort(-possible_refs["flux"])
-		if len(bydecflux) > nrefs:
-			refs = possible_refs[bydecflux[0:nrefs]]
-		else:
-			refs = possible_refs[bydecflux]
 	
-		print("Selected {0:d} reference stars".format(len(refs)))
-
-		targ_and_refs = np.concatenate((targ, refs))
-
-		#Determine the reference image from the stacked image header
-		stack_comments = stacked_image_header['COMMENT']
-		for i in range(len(stack_comments)):
-			if 'Reference image' in stack_comments[i]:
-				reference_filename = stack_comments[i].split(': ')[1]
-				break
-		
-		#Identify that image in the list of flattened files.
-		#NOTE this will only work if you're using the data from the same night as the stacked image
-		for i in range(len(file_list)):
-			if reference_filename in file_list[i].name:
-				reference_filepath = file_list[i]
-				break
-		
-		if plot or mode=='manual':
-			
-			fig, ax = plot_image(fits.open(reference_filepath)[0].data)
-			#ax.plot(objs_stack['x'],objs_stack['y'],'kx')
-			ax.plot(targ_and_refs['x'][0], targ_and_refs['y'][0],'bx')
-			ax.plot(targ_and_refs['x'][1:], targ_and_refs['y'][1:],'rx')
-			ax.text(targ_and_refs['x'][0]+5, targ_and_refs['y'][0]+5,'T',color='b',fontsize=14)
-			for i in range(1, len(targ_and_refs)):
-				ax.text(targ_and_refs['x'][i]+5,targ_and_refs['y'][i]+5,f'R{i}',color='r',fontsize=14,)
-			
-			if mode == 'manual':
-				ans = input('Enter IDs of reference stars to remove separated by commas (e.g. 2,4,15): ')
-				if len(ans) > 0:
-					split_ans = ans.replace(' ','').split(',')
-					refs_to_remove = np.sort([int(i) for i in split_ans])[::-1]
-					for i in refs_to_remove:
-						if i == 0:
-							print("Can't remove the target, skipping.")
-							continue
-						targ_and_refs = np.delete(targ_and_refs,i)
-					plt.close()
-					
-					fig, ax = plot_image(fits.open(file_list[0])[0].data)
-					#ax.plot(objs_stack['x'],objs_stack['y'],'kx')
-					ax.plot(targ_and_refs['x'][0], targ_and_refs['y'][0],'bx')
-					ax.plot(targ_and_refs['x'][1:], targ_and_refs['y'][1:],'rx')
-					ax.text(targ_and_refs['x'][0]+5, targ_and_refs['y'][0]+5,'T',color='b',fontsize=14)
-					for i in range(1, len(targ_and_refs)):
-						ax.text(targ_and_refs['x'][i]+5,targ_and_refs['y'][i]+5,f'R{i}',color='r',fontsize=14,)
-
-				reference_field_path = reference_file_path.parent/(f'{target}_target_and_refs.png')
-				plt.savefig(reference_field_path,dpi=300)
-				set_tierras_permissions(reference_field_path)
-				plt.close()
-		
-		#df = pd.DataFrame(targ_and_refs)
-		output_dict = {}
-		output_dict['x'] = [f'{val:0.4f}' for val in targ_and_refs['x']]
-		output_dict['y'] = [f'{val:0.4f}' for val in targ_and_refs['y']]
-		coords = [wcs.pixel_to_world(targ_and_refs['x'][i],targ_and_refs['y'][i]) for i in range(len(targ_and_refs))]
-		ras_deg = [coords[i].ra.value for i in range(len(coords))]
-		decs_deg = [coords[i].dec.value for i in range(len(coords))]
-		output_dict['ra'] = [f'{val:.5f}' for val in ras_deg]
-		output_dict['dec'] = [f'{val:.5f}' for val in decs_deg]
-		
-
-		#Query Gaia for information about sources. 
-		gaia_ids = []
-		parallaxes = np.zeros(len(targ_and_refs))
-		pmras = np.zeros(len(targ_and_refs))
-		pmdecs = np.zeros(len(targ_and_refs))
-		ruwes = np.zeros(len(targ_and_refs))
-		bp_rps = np.zeros(len(targ_and_refs))
-		gs = np.zeros(len(targ_and_refs))
-		abs_gs = np.zeros(len(targ_and_refs))
-		#TODO: What other parameters should be saved?
-		#TODO: What happens if no sources are found? If more than one are found?
-		print('Querying target and references in Gaia DR3...')
-		time.sleep(2)
-		for i in range(len(targ_and_refs)):
-			print(f'{i+1} of {len(targ_and_refs)}')
-			coord = SkyCoord(ras_deg[i],decs_deg[i],unit=(u.degree,u.degree))
-			result = Gaia.cone_search_async(coordinate=coord, radius=u.Quantity(1.0, u.arcsec)).get_results()
-			if len(result) == 0:
-				print('No object found, expanding search radius...')
-				result = Gaia.cone_search_async(coordinate=coord, radius=u.Quantity(5.0, u.arcsec)).get_results()
-			if len(result) > 1:
-				#Choose whichever Gaia source is closest to the Tierras position?
-				ind = np.argmin(np.sqrt((result['ra']-ras_deg[i])**2+(result['dec']-decs_deg[i])**2))
-			else:
-				ind = 0 
-			try:
-				gaia_ids.append(result[ind]['source_id'])
-				parallaxes[i] = result[ind]['parallax']
-				pmras[i] = result[ind]['pmra']
-				pmdecs[i] = result[ind]['pmdec']
-				ruwes[i] = result[ind]['ruwe']
-				bp_rps[i] = result[ind]['bp_rp']
-				gs[i] = result[ind]['phot_g_mean_mag']
-				abs_gs[i] = gs[i]-5*np.log10(1/(parallaxes[i]/1000)) + 5
-			except:
-				print('No source found, appending NaNs!')
-				gaia_ids.append('nan')
-				parallaxes[i] = np.nan
-				pmras[i] = np.nan
-				pmdecs[i] = np.nan
-				ruwes[i] = np.nan
-				bp_rps[i] = np.nan
-				gs[i] = np.nan
-				abs_gs[i] = np.nan
-			
-			
-
-		output_dict['gaia id'] = gaia_ids
-		output_dict['parallax'] = [f'{val:0.5f}' for val in parallaxes]
-		output_dict['pmra'] =  [f'{val:0.5f}' for val in pmras]
-		output_dict['pmdec'] =  [f'{val:0.5f}' for val in pmdecs]
-		output_dict['pmdec'] =  [f'{val:0.5f}' for val in pmdecs]
-		output_dict['ruwe'] =  [f'{val:0.4f}' for val in ruwes]
-		output_dict['bp_rp'] =  [f'{val:0.4f}' for val in bp_rps]
-		output_dict['G'] = [f'{val:0.4f}' for val in gs]
-		output_dict['abs_G'] = [f'{val:0.4f}' for val in abs_gs]
-
-		output_df = pd.DataFrame(output_dict)
-		output_df.to_csv(reference_file_path, index=False)
-		set_tierras_permissions(reference_file_path)
-		output_df = pd.read_csv(reference_file_path) #Read it back in to get the type casting right for later steps
-	else:
-		print(f'Restoring target/reference star positions from {reference_file_path}')
+	if (overwrite == False) and (reference_file_path.exists()):
+		print(f'Restoring existing target/reference star output from {reference_file_path}')
 		output_df = pd.read_csv(reference_file_path)
-	return output_df
+		return output_df
+
+	PLATE_SCALE = 0.432 
+	stacked_image_path = f'/data/tierras/targets/{field}/{field}_stacked_image.fits'
+	hdu = fits.open(stacked_image_path)
+	data = hdu[0].data
+	header = hdu[0].header
+	wcs = WCS(header)
+	tierras_epoch = Time(header['TELDATE'],format='decimalyear')
+	
+	if plot:
+		fig, ax = plt.subplots(1,1,figsize=(13,8))
+		ax.imshow(data, origin='lower', cmap='Greys_r', norm=simple_norm(data, min_percent=1,max_percent=99))
+		plt.tight_layout()
+
+	coord = SkyCoord(wcs.pixel_to_world(int(data.shape[1]/2),int(data.shape[0]/2)))
+	#width = u.Quantity(PLATE_SCALE*data.shape[0],u.arcsec)
+	width = 1500*u.arcsec
+	height = u.Quantity(PLATE_SCALE*data.shape[1],u.arcsec)
+
+	# query Gaia for all the sources in the field
+	# grab distances and absolute mags from Bailer-Jones 'photogeo' catalog
+	job = Gaia.launch_job_async("""SELECT
+								source_id, ra, ra_error, dec, dec_error, ref_epoch, pmra, pmra_error, pmdec, pmdec_error, parallax, parallax_error, parallax_over_error, ruwe, phot_bp_mean_mag, phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_flux, phot_bp_mean_flux_error, phot_g_mean_flux, phot_g_mean_flux_error, phot_rp_mean_flux, phot_rp_mean_flux_error, bp_rp, bp_g, g_rp, phot_variable_flag,radial_velocity, radial_velocity_error, non_single_star,
+								teff_gspphot, logg_gspphot, mh_gspphot, r_med_geo, r_lo_geo, r_hi_geo, r_med_photogeo, r_lo_photogeo, r_hi_photogeo,
+								phot_bp_mean_mag-phot_rp_mean_mag AS bp_rp,
+								phot_g_mean_mag - 5 * LOG10(r_med_geo) + 5 AS qg_geo,
+								phot_g_mean_mag - 5 * LOG10(r_med_photogeo) + 5 AS gq_photogeo
+									FROM (
+										SELECT * FROM gaiadr3.gaia_source as gaia
+
+										WHERE gaia.ra BETWEEN {} AND {} AND
+											  gaia.dec BETWEEN {} AND {}
+
+										OFFSET 0
+									) AS edr3
+									JOIN external.gaiaedr3_distance using(source_id)
+									ORDER BY phot_rp_mean_mag ASC
+								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2)
+								)
+	res = job.get_results()
+
+	# cut to entries without masked pmra values; otherwise the crossmatch will break
+	problem_inds = np.where(res['pmra'].mask)[0]
+
+	# set the pmra, pmdec, and parallax of those indices to 0
+	res['pmra'][problem_inds] = 0
+	res['pmdec'][problem_inds] = 0
+	res['parallax'][problem_inds] = 0
+
+	gaia_coords = SkyCoord(ra=res['ra'], dec=res['dec'], pm_ra_cosdec=res['pmra'], pm_dec=res['pmdec'], obstime=Time('2016',format='decimalyear'))
+	v = Vizier(catalog="II/246",columns=['*','Date'], row_limit=-1)
+	twomass_res = v.query_region(coord, width=width, height=height)[0]
+	twomass_coords = SkyCoord(twomass_res['RAJ2000'],twomass_res['DEJ2000'])
+	twomass_epoch = Time('2000-01-01')
+	gaia_coords_tm_epoch = gaia_coords.apply_space_motion(twomass_epoch)
+	gaia_coords_tierras_epoch = gaia_coords.apply_space_motion(tierras_epoch)
+
+	idx_gaia, sep2d_gaia, _ = gaia_coords_tm_epoch.match_to_catalog_sky(twomass_coords)
+	#Now set problem indices back to NaNs
+	res['pmra'][problem_inds] = np.nan
+	res['pmdec'][problem_inds] = np.nan
+	res['parallax'][problem_inds] = np.nan
+	
+	tierras_pixel_coords = wcs.world_to_pixel(gaia_coords_tierras_epoch)
+
+	res.add_column(twomass_res['_2MASS'][idx_gaia],name='2MASS',index=1)
+	res.add_column(tierras_pixel_coords[0],name='X pix', index=2)
+	res.add_column(tierras_pixel_coords[1],name='Y pix', index=3)
+	res.add_column(gaia_coords_tierras_epoch.ra, name='ra_tierras', index=4)
+	res.add_column(gaia_coords_tierras_epoch.dec, name='dec_tierras', index=5)
+	res['Jmag'] = twomass_res['Jmag'][idx_gaia]
+	res['e_Jmag'] = twomass_res['e_Jmag'][idx_gaia]
+	res['Hmag'] = twomass_res['Hmag'][idx_gaia]
+	res['e_Hmag'] = twomass_res['e_Hmag'][idx_gaia]
+	res['Kmag'] = twomass_res['Kmag'][idx_gaia]
+	res['e_Kmag'] = twomass_res['e_Kmag'][idx_gaia]
+
+	# determine which chip the sources fall on 
+	# 0 = bottom, 1 = top 
+	chip_inds = np.zeros(len(res),dtype='int')
+	chip_inds[np.where(res['Y pix'] >= 1023)] = 1
+	res.add_column(chip_inds, name='Chip')
+	
+	#Cut to sources that actually fall in the image
+	use_inds = np.where((tierras_pixel_coords[0]>0)&(tierras_pixel_coords[0]<data.shape[1]-1)&(tierras_pixel_coords[1]>0)&(tierras_pixel_coords[1]<data.shape[0]-1))[0]
+	res = res[use_inds]
+
+	#Cut to sources that are away from the edges
+	use_inds = np.where((res['Y pix'] > edge_limit) & (res['Y pix']<data.shape[0]-edge_limit-1) & (res['X pix'] > edge_limit) & (res['X pix'] < data.shape[1]-edge_limit-1))[0]
+	res = res[use_inds]
+
+	# save a copy of all the Gaia sources in the field
+	all_field_sources = copy.deepcopy(res)
+
+	# remove sources with high RUWE values
+	use_inds = np.where(res['ruwe'] < 1.4)[0]
+	res = res[use_inds]
+
+	# remove sources that are flagged as variable
+	use_inds = np.where(res['phot_variable_flag'] != 'VARIABLE')[0]
+	res = res[use_inds]
+
+	# remove sources that are flagged as non-single stars
+	use_inds = np.where(res['non_single_star'] == 0)[0]
+	res = res[use_inds]
+
+	# identify the target using its position in the header if no target position has been passed
+	if target_position == (0,0):
+		target_ra = header['CAT-RA']
+		target_dec = header['CAT-DEC']
+		target_x, target_y = wcs.world_to_pixel(SkyCoord(target_ra+' '+target_dec, unit=(u.hourangle, u.deg), obstime=tierras_epoch))
+	else:
+	# otherwise use the passed target position
+		target_x, target_y = target_position
+
+	# identify the target in the Gaia table by selecting the one with the minimum distance from (target_x, target_y)
+	target_ind = np.argmin(((res['X pix']-target_x)**2+(res['Y pix']-target_y)**2)**0.5)
+	target = res[target_ind]
+	target_rp = target['phot_rp_mean_mag']
+	
+	ref_stars = copy.deepcopy(res)
+	ref_stars.remove_rows(target_ind)
+	
+	# select reference stars that are within a flux range around target_rp 
+	use_inds = np.where((ref_stars['phot_rp_mean_flux']/target['phot_rp_mean_flux'] > dimness_limit) & (ref_stars['phot_rp_mean_flux']/target['phot_rp_mean_flux'] < 5))[0]
+	ref_stars = ref_stars[use_inds]
+
+	#Remove refs that are too close to other sources (dist < nearness_limit pix)
+	use_inds = []
+	for i in range(len(ref_stars)):
+		dists = ((ref_stars['X pix'][i]-all_field_sources['X pix'])**2+(ref_stars['Y pix'][i]-all_field_sources['Y pix'])**2)**0.5
+		dists = np.delete(dists,np.where(dists==0)[0]) #Remove the source itself from the distance calculation
+		if min(dists) >= nearness_limit:
+			use_inds.append(i)
+	ref_stars = ref_stars[use_inds]
+
+	#Remove refs that are more than targ_distance_limit away from the target
+	dists = ((ref_stars['X pix']-target_x)**2+(ref_stars['Y pix']-target_y)**2)**0.5
+	use_inds= np.where(dists < targ_distance_limit)[0]
+	ref_stars = ref_stars[use_inds]
+
+	# 		#Extra masking on bad columns
+	# 		bpm[0:1032, 1431:1472] = True
+	# 		bpm[1023:, 1771:1813]  = True
+
+	# 		#Extra masking on divide between top/bottom detectors 
+	# 		bpm[1009:1042,:] = True
+
+	# remove ref stars that are too close to the bad columns or the divide between the detector halves
+	bad_inds_col_1 = np.where((ref_stars['X pix'] >= 1431) & (ref_stars['X pix'] <= 1472) & (ref_stars['Y pix'] <= 1032))[0]
+	ref_stars.remove_rows(bad_inds_col_1)
+
+	bad_inds_col_2 = np.where((ref_stars['X pix'] >= 1771) & (ref_stars['X pix'] <= 1813) & (ref_stars['Y pix'] >= 1023))[0]
+	ref_stars.remove_rows(bad_inds_col_2)
+
+	bad_inds_half = np.where((ref_stars['Y pix'] >= 1019) & (ref_stars['Y pix'] <= 1032))[0]
+	ref_stars.remove_rows(bad_inds_half)
+
+	print(f'Found {len(ref_stars)} reference stars!')
+	print(f"Estimated ref star counts / target: {sum(ref_stars['phot_rp_mean_flux'])/target['phot_rp_mean_flux']:0.2f}")
+	if plot:
+		# ax.plot(all_field_sources['X pix'], all_field_sources['Y pix'], marker='x', ls='', color='tab:red')
+		ax.plot(ref_stars['X pix'], ref_stars['Y pix'], marker='x', ls='', color='tab:blue')
+		ax.plot(target['X pix'], target['Y pix'], marker='o', ls='', color='m')
+
+		fig1, ax1 = plt.subplots(1,1,figsize=(6,5))
+		ax1.scatter(all_field_sources['bp_rp'], all_field_sources['gq_photogeo'], marker='.', color='k', alpha=0.7, label='Field sources')
+		ax1.plot(target['bp_rp'], target['gq_photogeo'], marker='o', color='m', ls='', label='Target')
+		ax1.scatter(ref_stars['bp_rp'], ref_stars['gq_photogeo'], marker='x', color='tab:blue', label='Reference stars')
+		ax1.invert_yaxis()
+		ax1.set_xlabel('B$_{p}-$R$_p$', fontsize=14)
+		ax1.set_ylabel('M$_{G}$', fontsize=14)
+		ax1.tick_params(labelsize=12)
+		ax1.legend()
+		plt.tight_layout()
+	
+	# create the output dataframe consisting of the target as the 0th entry and the reference stars
+	output_table = copy.deepcopy(ref_stars)
+	output_table.insert_row(0, target)
+
+	if plot:
+		plt.figure(1)
+		reference_field_path = reference_file_path.parent/(f'{field}_target_and_refs.png')
+		plt.savefig(reference_field_path,dpi=150)
+		set_tierras_permissions(reference_field_path)
+		plt.close()
+
+		plt.figure(2)
+		cmd_path = reference_file_path.parent/(f'{field}_cmd.png')
+		plt.savefig(cmd_path,dpi=300)
+		set_tierras_permissions(cmd_path)
+		plt.close()
+
+	# write out the source csv files
+	all_sources_df = all_field_sources.to_pandas()
+	all_sources_df.to_csv(reference_file_path.parent/(f'{field}_all_source_detections.csv'), index=0)
+
+	output_df = output_table.to_pandas()
+	output_df.to_csv(reference_file_path.parent/(f'{field}_target_and_ref_stars.csv'), index=0)
+	return output_df 
 
 def load_bad_pixel_mask():
 	#Load in the BPM. Code stolen from imred.py.
@@ -2542,8 +2522,8 @@ def main(raw_args=None):
 	ap.add_argument("-target_position_x",required=False,default=0,help="User-specified x target position in pixel coordinates.",type=float)
 	ap.add_argument("-target_position_y",required=False,default=0,help="User-specified y target position in pixel coordinates.",type=float)
 	ap.add_argument("-nearness_limit",required=False,default=15,help="Minimum separation a source has to have from all other sources to be considered as a reference star.",type=float)
-	ap.add_argument("-edge_limit",required=False,default=55,help="Minimum separation a source has from the detector edge to be considered as a reference star.",type=float)
-	ap.add_argument("-dimness_limit",required=False,default=0.05,help="Minimum flux a reference star can have compared to the target to be considered as a reference star.",type=float)
+	ap.add_argument("-edge_limit",required=False,default=40,help="Minimum separation a source has from the detector edge to be considered as a reference star.",type=float)
+	ap.add_argument("-dimness_limit",required=False,default=0.025,help="Minimum flux a reference star can have compared to the target to be considered as a reference star.",type=float)
 	ap.add_argument("-targ_distance_limit",required=False,default=2000,help="Maximum distance a source can be from the target in pixels to be considered as a reference star.",type=float)
 	ap.add_argument("-overwrite_refs",required=False,default=False,help="Whether or not to overwrite previous reference star output.",type=str)
 	ap.add_argument("-centroid",required=False,default=True,help="Whether or not to centroid during aperture photometry.",type=str)
