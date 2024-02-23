@@ -10,7 +10,7 @@ from matplotlib import gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from astropy.visualization import ImageNormalize, ZScaleInterval, simple_norm
 from astropy.convolution import Gaussian1DKernel, Gaussian2DKernel, interpolate_replace_nans
-from astropy.coordinates import SkyCoord, get_moon
+from astropy.coordinates import SkyCoord, get_body, AltAz
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.stats import SigmaClip, sigma_clipped_stats
@@ -29,7 +29,7 @@ from photutils.detection import DAOStarFinder, IRAFStarFinder
 from photutils.psf import BasicPSFPhotometry, IntegratedGaussianPRF, DAOGroup, extract_stars, EPSFBuilder
 from photutils.background import Background2D, MedianBackground
 from photutils.aperture import CircularAperture, EllipticalAperture, CircularAnnulus, aperture_photometry
-from photutils.centroids import centroid_1dg, centroid_2dg, centroid_com, centroid_quadratic
+from photutils.centroids import centroid_1dg, centroid_2dg, centroid_com, centroid_quadratic, centroid_sources
 from scipy.stats import sigmaclip, pearsonr, linregress
 from scipy.spatial.distance import cdist
 from scipy.signal import correlate2d, fftconvolve, savgol_filter
@@ -580,13 +580,50 @@ def jd_utc_to_bjd_tdb(jd_utc, ra, dec, location='Whipple'):
 	ltt_bary = input_jd_utc.light_travel_time(target)
 	return (input_jd_utc.tdb + ltt_bary).value
 
-def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, an_out=60, centroid=False, live_plot=False, type='fixed'):
+def circular_footprint(radius, dtype=int):
+    """
+	TAKEN DIRECTLY FROM PHOTUTILS!!!
+    """
+    if ~np.isfinite(radius) or radius <= 0 or int(radius) != radius:
+        raise ValueError('radius must be a positive, finite integer greater '
+                         'than 0')
+
+    x = np.arange(-radius, radius + 1)
+    xx, yy = np.meshgrid(x, x)
+    return np.array((xx**2 + yy**2) <= radius**2, dtype=dtype)
+
+def generate_square_cutout(image, position, size):
+	height, width = image.shape
+	
+	# Calculate the bounds of the cutout
+	half_size = size / 2
+	top = max(0, int(position[0] - half_size))
+	bottom = min(width, int(position[0] + half_size))
+	left = max(0, int(position[1] - half_size))
+	right = min(height, int(position[1] + half_size))
+	
+	# Calculate the actual position within the cutout
+	adjusted_position = (int(half_size - (position[0] - top)), int(half_size - (position[1] - left)))
+	
+	# Generate the square cutout
+	cutout = np.zeros((size, size), dtype=image.dtype)
+	cutout[adjusted_position[1]:(adjusted_position[1] + right - left), adjusted_position[0]:(adjusted_position[0] + bottom - top),] = image[left:right, top:bottom]
+
+	cutout[cutout == 0] = np.nan
+	
+	# Calculate the position of the input 'position' in the cutout
+	# position_in_cutout = (half_size - adjusted_position[0], half_size - adjusted_position[1])
+	position_in_cutout = (adjusted_position[0] + position[0] - top, adjusted_position[1] + position[1] - left)
+
+	return cutout, position_in_cutout
+
+def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, an_out=60, centroid=False, live_plot=False, type='fixed', bkg_type='1d'):
 
 	ffname = file_list[0].parent.name	
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
 
-	#file_list = file_list[383:] #TESTING!!!
+	# file_list = file_list[-3:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
@@ -654,22 +691,22 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 	wind_dirs = np.zeros(len(file_list),dtype='float16')
 
 	loop_times = np.zeros(len(file_list),dtype='float16')
-	#lunar_distance = np.zeros(len(file_list),dtype='float16')
+	lunar_distance = np.zeros(len(file_list),dtype='float16')
 	
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH SOURCE IN EACH FILE
 	source_x = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
 	source_y = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
 	source_sky_ADU = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
-	source_sky_e = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
+	# source_sky_e = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
 	source_x_fwhm_arcsec = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
 	source_y_fwhm_arcsec = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
 	source_theta_radians = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
 
 	#ARRAYS THAT CONTAIN DATA PERTAININING TO EACH APERTURE RADIUS FOR EACH SOURCE FOR EACH FILE
 	source_minus_sky_ADU = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
-	source_minus_sky_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	# source_minus_sky_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
 	source_minus_sky_err_ADU = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
-	source_minus_sky_err_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
+	# source_minus_sky_err_e = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
 	non_linear_flags = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='bool')
 	saturated_flags = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='bool')
 	ensemble_alc_ADU = np.zeros((len(ap_radii),len(targ_and_refs),len(file_list)),dtype='float32')
@@ -724,7 +761,8 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 	n_files = len(file_list)
 	if live_plot:
 		#fig, ax = plt.subplots(2,2,figsize=(16,9))
-		ap_plot_ind = int(len(ap_radii)/2) #Set the central aperture as the one to plot
+		# ap_plot_ind = int(len(ap_radii)/2) #Set the central aperture as the one to plot
+		ap_plot_ind = np.where(np.array(ap_radii) == 15)[0][0]
 		fig = plt.figure(figsize=(13,7))
 		gs = gridspec.GridSpec(2,4,figure=fig)
 		ax1 = fig.add_subplot(gs[0,0:2])
@@ -732,6 +770,10 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 		ax3 = fig.add_subplot(gs[1,1])
 		ax4 = fig.add_subplot(gs[0,2:])
 		ax5 = fig.add_subplot(gs[1,2:])
+
+	# declare a circular footprint in case centroiding is performed
+	# only data within a radius of x pixels around the expected source positions from WCS will be considered for centroiding
+	centroid_footprint = circular_footprint(7)
 
 	print(f'Doing fixed-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.\n')
 	time.sleep(2)
@@ -809,7 +851,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			wind_gusts[i] = np.nan
 			wind_dirs[i] = np.nan
 
-		#lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary
+		lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary
 		
 		#Calculate expected scintillation noise in this image
 		scintillation_rel = 0.09*(130)**(-2/3)*airmasses[i]**(7/4)*(2*EXPTIME)**(-1/2)*np.exp(-2306/8000)
@@ -828,208 +870,187 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 		# 	ax2.plot(source_x[j,i],source_y[j,i],'rx')
 		# breakpoint()
 
-		#DO PHOTOMETRY AT UPDATED SOURCE POSITIONS FOR ALL SOURCES AND ALL APERTURES
-		for j in range(len(targ_and_refs)):
-			x_pos_image = source_x[j,i]
-			y_pos_image = source_y[j,i]
+		source_positions = [(source_x[j,i], source_y[j,i]) for j in range(len(targ_and_refs))]
+		if centroid:
+			# mask any pixels in the image above the non-linear threshold
+			mask = np.zeros(np.shape(source_data), dtype='bool')
+			mask[np.where(source_data>NONLINEAR_THRESHOLD)] = 1
 
-			#Check that the source position falls on the chip. If not, set its measured fluxes to NaNs.
-			#TODO: NaN all the quantities you want to ignore. 
-			if (x_pos_image < 0) or (x_pos_image > 4095) or (y_pos_image < 0) or (y_pos_image > 2047):
-				source_minus_sky_ADU[k,j,i] = np.nan
-				continue
+			centroid_x, centroid_y = centroid_sources(source_data,source_x[:,i], source_y[:,i], centroid_func=centroid_2dg, footprint=centroid_footprint, mask=mask)
 			
-			#Set up the source cutout
-			cutout_y_start = max([int(y_pos_image-an_out),0])
-			cutout_y_end = min([int(y_pos_image+an_out),2047])
-			cutout_x_start = max([int(x_pos_image-an_out),0])
-			cutout_x_end = min([int(x_pos_image+an_out),4095])
-			cutout = source_data[cutout_y_start:cutout_y_end+1,cutout_x_start:cutout_x_end+1]
-			cutout = cutout.copy(order='C')
-			cutout_x_len = cutout.shape[1]
-			cutout_y_len = cutout.shape[0]
+			# update source positions
+			source_x[:,i] = centroid_x 
+			source_y[:,i] = centroid_y
+			source_positions = [(source_x[j,i], source_y[j,i]) for j in range(len(targ_and_refs))]
+
+			# fig, ax = plot_image(source_data)
+			# ax.scatter(centroid_x, centroid_y, color='b', marker='x')
+			# breakpoint()
+
+		# Do photometry
+		# Set up apertures
+		if type == 'fixed':
+			apertures = [CircularAperture(source_positions,r=ap_radii[k]) for k in range(len
+			(ap_radii))]
+		# TODO: need to implement variable apertures!
+		# elif type == 'variable':
+		# 	apertures = [CircularAperture(source_positions,r=ap_radii[k]*smoothed_fwhm_pix[i])]
 			
+		if live_plot:
+			cutout, cutout_pos = generate_square_cutout(source_data, source_positions[0], 50)
+			x_pos_cutout = cutout_pos[0]
+			y_pos_cutout = cutout_pos[1]
+			norm = simple_norm(cutout,'linear',min_percent=0,max_percent=99.5)
+			ax2.imshow(cutout,origin='lower',interpolation='none',norm=norm,cmap='Greys_r')
+			#ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm)
+			ax2.plot(x_pos_cutout,y_pos_cutout, color='m', marker='x',mew=1.5,ms=8)
+			ap_circle = plt.Circle((x_pos_cutout,y_pos_cutout),apertures[ap_plot_ind].r,fill=False,color='m',lw=2)
+			an_in_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_in,fill=False,color='m',lw=2)
+			an_out_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_out,fill=False,color='m',lw=2)
+			ax2.add_patch(ap_circle)
+			ax2.add_patch(an_in_circle)
+			ax2.add_patch(an_out_circle)
+			ax2.set_xlim(0,cutout.shape[1])
+			ax2.set_ylim(0,cutout.shape[0])
+			ax2.grid(False)
+			ax2.set_title('Target')
 
-			#Set up grid of x/y pixel indices for the cutout
-			xx,yy = np.meshgrid(np.arange(cutout_x_len),np.arange(cutout_y_len))
+			ax1.imshow(source_data,origin='lower',interpolation='none',norm=simple_norm(source_data,'linear',min_percent=1,max_percent=99.9), cmap='Greys_r')
+			ax1.grid(False)
+			ax1.set_title(file_list[i].name)
+			for l in range(len(source_x)):
+				if l == 0:
+					color = 'm'
+					name = 'T'
+				else:
+					color = 'tab:red'
+					name = f'R{l}'
+				ap_circle = plt.Circle((source_x[l,i],source_y[l,i]),30,fill=False,color=color,lw=1)
+				ax1.add_patch(ap_circle)
+				ax1.text(source_x[l,i]+15,source_y[l,i]+15,name,color=color,fontsize=14)
+		
+		# check for non-linear/saturated pixels in the apertures 
+		# just do in the smallest aperture for now  
+		aperture_masks = apertures[0].to_mask(method='center')
+		for j in range(len(apertures[0])):
+			ap_cutout = aperture_masks[j].multiply(source_data)
+			ap_pix_vals = ap_cutout[ap_cutout!=0]
+			non_linear_flags[:,j,i] = int(np.sum(ap_pix_vals>NONLINEAR_THRESHOLD)>0)
+			saturated_flags[:,j,i] = int(np.sum(ap_pix_vals>SATURATION_THRESHOLD)>0)
+		
+		# measure background
+		if bkg_type == '1d':
+			annuli = CircularAnnulus(source_positions, an_in, an_out)
+			annulus_masks = annuli.to_mask(method='center')
+			for j in range(len(annuli)):
+				source_sky_ADU[j,i] = np.mean(sigmaclip(annulus_masks[j].get_values(source_data),2,2)[0])
+		elif bkg_type == '2d':
+			sigma_clip = SigmaClip(sigma=3.0)
+			bkg_estimator = MedianBackground()
+			bkg = Background2D(source_data, (32, 32), filter_size=(3, 3), sigma_clip=sigma_clip, bkg_estimator=bkg_estimator, mask=mask)
+			phot_table_2 = aperture_photometry(bkg.background, apertures)
+			
+			# fig1, ax1 = plt.subplots(1,3,figsize=(19,5),sharex=True,sharey=True)
+			# norm1 = simple_norm(source_data, min_percent=1, max_percent=99)
+			# ax1[0].imshow(source_data, origin='lower', norm=norm1)
+			# ax1[0].plot(centroid_x, centroid_y, 'rx')
 
-			#Transform the source position from image to cutout coordinates
-			x_pos_cutout = x_pos_image-int(x_pos_image)+an_out
-			y_pos_cutout = y_pos_image-int(y_pos_image)+an_out
+			# norm2 = simple_norm(bkg.background, min_percent=1, max_percent=99)
+			# ax1[1].imshow(bkg.background, origin='lower', norm=norm2)
 
-			#Optionally recompute the centroid
-			if centroid:
-				#TODO: What size should this mask be? Should we use the bad pixel mask instead? Should we just toss any stars that are remotely close to bad columns? 
-				centroid_mask = np.ones(cutout.shape, dtype='bool')
-				x_mid = int(cutout_x_len/2)
-				y_mid = int(cutout_y_len/2)
-				centroid_mask[y_mid-centroid_mask_half_l:y_mid+centroid_mask_half_l,x_mid-centroid_mask_half_l:x_mid+centroid_mask_half_l] = False
+			# norm3 = simple_norm(source_data-bkg.background, min_percent=1, max_percent=99)
+			# ax1[2].imshow(source_data-bkg.background, origin='lower', norm=norm3)
+			# plt.tight_layout()
+			# breakpoint()
+			# plt.close()
+			
+			# Save the estimated per-pixel background by dividing the background in the largest aperture by the area of the largest aperture
+			source_sky_ADU[:,i] = phot_table_2[f'aperture_sum_{len(ap_radii)-1}']/(np.pi*ap_radii[-1]**2)
+
+		# do photometry on the *sources*
+		phot_table = aperture_photometry(source_data, apertures)
+
+		# Calculate sky-subtracted flux
+		for k in range(len(ap_radii)):
+			source_radii[k, i] = ap_radii[k]
+			ap_area = apertures[k].area
+			
+			# for 1d background, subtract off the average bkg value measured in the annulus times the aperture area
+			if bkg_type == '1d':
+				source_minus_sky_ADU[k,:,i] = phot_table[f'aperture_sum_{k}']-source_sky_ADU[:,i]*ap_area
+
+			# for 2d background, subtract off the aperture_sum in the aperture in the 2D background model
+			elif bkg_type == '2d':
+				source_minus_sky_ADU[k,:,i] = phot_table[f'aperture_sum_{k}'] - phot_table_2[f'aperture_sum_{k}']
+				source_sky_ADU
 				
-				#t2 = time.time()
-				x_pos_cutout_centroid, y_pos_cutout_centroid = centroid_1dg(cutout-np.median(cutout),mask=centroid_mask)
-				#x_pos_cutout_centroid, y_pos_cutout_centroid = centroid_com(cutout-np.median(cutout),mask=centroid_mask)
-				#print(time.time()-t2)
+				# norm1 = simple_norm(source_data, min_percent=1, max_percent=99)
+				# ax1[0].imshow(source_data, origin='lower', norm=norm1)
+				# ax1[0].plot(centroid_x, centroid_y, 'rx')
 
-				# if j == 0:
-				# 	plt.figure()
-				# 	plt.imshow(cutout,origin='lower',interpolation='none',norm=simple_norm(cutout,max_percent=97))
-				# 	plt.plot(x_pos_cutout_centroid, y_pos_cutout_centroid, 'rx')
-				# 	breakpoint()
-				# 	plt.close()
+				# norm2 = simple_norm(bkg.background, min_percent=1, max_percent=99)
+				# ax1[1].imshow(bkg.background, origin='lower', norm=norm2)
 
-				#Make sure the measured centroid is actually in the unmasked region
-				#if (x_pos_cutout_centroid > 0) and (x_pos_cutout_centroid < cutout.shape[1]) and (y_pos_cutout_centroid > 0) and (y_pos_cutout_centroid < cutout.shape[0]):
-				if (abs(x_pos_cutout_centroid-x_mid) < centroid_mask_half_l) and (abs(y_pos_cutout_centroid-y_mid) < centroid_mask_half_l):
-					x_pos_cutout = x_pos_cutout_centroid
-					y_pos_cutout = y_pos_cutout_centroid
-							
-				#Update position in full image using measured centroid
-				x_pos_image = x_pos_cutout + int(x_pos_image) - an_out
-				y_pos_image = y_pos_cutout + int(y_pos_image) - an_out
-				source_x[j,i] = x_pos_image
-				source_y[j,i] = y_pos_image
-			 
-			#Estimate background (NOTE: this can be performed at this loop level because we use the same background annulus regardless of the aperture size. If that assumption ever changes it will have to be moved inside of the aperture loop.)
+				# norm3 = simple_norm(source_data-bkg.background, min_percent=1, max_percent=99)
+				# ax1[2].imshow(source_data-bkg.background, origin='lower', norm=norm3)
+				# plt.tight_layout()
+				# plt.pause(0.1)
+				# ax1[0].cla()
+				# ax1[1].cla()
+				# ax1[2].cla()
 
-			#Create array of pixel distances in the cutout from the source position
-			dists = np.sqrt((x_pos_cutout-xx)**2+(y_pos_cutout-yy)**2)
-			#Determine which pixels are in the annulus using their distances from (x_pos_cutout,y_pos_cutout)
-			an_inds = np.where((dists<an_out)&(dists>an_in))  
-			an_data = cutout[an_inds]
-			v, l, h = sigmaclip(an_data[an_data!=0],2,2)
-			bkg = np.mean(v)
-			source_sky_ADU[j,i] = bkg
-			source_sky_e[j,i] = bkg*GAIN
+			# source_minus_sky_e[k,:,i] = source_minus_sky_ADU[k,:,i]*GAIN
 
-			for k in range(len(ap_radii)):
-				if type == 'fixed':
-					ap = CircularAperture((x_pos_cutout,y_pos_cutout),r=ap_radii[k])
-				elif type == 'variable':
-					ap = CircularAperture((x_pos_cutout,y_pos_cutout),r=ap_radii[k]*smoothed_fwhm_pix[i])
+			#Calculation scintillation 
+			scintillation_abs_e = scintillation_rel * source_minus_sky_ADU[k,:,i]*GAIN
+			
+			# Calculate uncertainty
+			source_minus_sky_err_e = np.sqrt(source_minus_sky_ADU[k,:,i]*GAIN+ source_sky_ADU[:,i]*ap_area*GAIN + DARK_CURRENT*EXPTIME*ap_area + ap_area*READ_NOISE**2 + scintillation_abs_e**2)
+			source_minus_sky_err_ADU[k,:,i] = source_minus_sky_err_e / GAIN
 
-				#ap = EllipticalAperture((x_pos_cutout,y_pos_cutout),a=15,b=9, theta=90*np.pi/180)
-				#an = CircularAnnulus((x_pos_cutout,y_pos_cutout),r_in=an_in,r_out=an_out)
+		#Measure FWHM 
+		k = 0
+		for j in range(len(source_positions)):
+			#g_2d_cutout = cutout[int(y_pos_cutout)-25:int(y_pos_cutout)+25,int(x_pos_cutout)-25:int(x_pos_cutout)+25]
+			#t1 = time.time()
 
-				if live_plot and j == 0 and k == ap_plot_ind:
-					norm = simple_norm(cutout,'linear',min_percent=0,max_percent=99.5)
-					ax2.imshow(cutout,origin='lower',interpolation='none',norm=norm,cmap='Greys_r')
-					#ax[1,0].imshow(cutout,origin='lower',interpolation='none',norm=norm)
-					ax2.plot(x_pos_cutout,y_pos_cutout, color='m', marker='x',mew=1.5,ms=8)
-					ap_circle = plt.Circle((x_pos_cutout,y_pos_cutout),ap.r,fill=False,color='m',lw=2)
-					an_in_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_in,fill=False,color='m',lw=2)
-					an_out_circle = plt.Circle((x_pos_cutout,y_pos_cutout),an_out,fill=False,color='m',lw=2)
-					ax2.add_patch(ap_circle)
-					ax2.add_patch(an_in_circle)
-					ax2.add_patch(an_out_circle)
-					ax2.set_xlim(0,cutout.shape[1])
-					ax2.set_ylim(0,cutout.shape[0])
-					ax2.grid(False)
-					ax2.set_title('Target')
+			#g_2d_cutout = copy.deepcopy(cutout)
+			g_2d_cutout, cutout_pos = generate_square_cutout(source_data, source_positions[j], 40)
 
-					ax1.imshow(source_data,origin='lower',interpolation='none',norm=simple_norm(source_data,'linear',min_percent=1,max_percent=99.9), cmap='Greys_r')
-					ax1.grid(False)
-					ax1.set_title(file_list[i].name)
-					for l in range(len(source_x)):
-						if l == 0:
-							color = 'm'
-							name = 'T'
-						else:
-							color = 'tab:red'
-							name = f'R{l}'
-						ap_circle = plt.Circle((source_x[l,i],source_y[l,i]),30,fill=False,color=color,lw=1)
-						ax1.add_patch(ap_circle)
-						ax1.text(source_x[l,i]+15,source_y[l,i]+15,name,color=color,fontsize=14)
+			bkg = np.mean(sigmaclip(g_2d_cutout,2,2)[0])
 
-				if type == 'fixed':
-					source_radii[k,i] = ap_radii[k]
-				elif type == 'variable':
-					source_radii[k,i] = ap_radii[k]*smoothed_fwhm_pix[i]
-				an_in_radii[k,i] = an_in
-				an_out_radii[k,i] = an_out
+			xx2,yy2 = np.meshgrid(np.arange(g_2d_cutout.shape[1]),np.arange(g_2d_cutout.shape[0]))
+			g_init = models.Gaussian2D(amplitude=g_2d_cutout[int(g_2d_cutout.shape[1]/2), int(g_2d_cutout.shape[0]/2)]-bkg,x_mean=cutout_pos[0],y_mean=cutout_pos[1], x_stddev=5, y_stddev=5)
+			fit_g = fitting.LevMarLSQFitter()
+			g = fit_g(g_init,xx2,yy2,g_2d_cutout-bkg)
+			
+			g.theta.value = g.theta.value % (2*np.pi) #Constrain from 0-2pi
+			if g.y_stddev.value > g.x_stddev.value: 
+				x_stddev_save = g.x_stddev.value
+				y_stddev_save = g.y_stddev.value
+				g.x_stddev = y_stddev_save
+				g.y_stddev = x_stddev_save
+				g.theta += np.pi/2
 
-				# ap.plot(color='r',lw=2.5)
-				# an.plot(color='r',lw=2.5)
+			x_stddev_pix = g.x_stddev.value
+			y_stddev_pix = g.y_stddev.value 
+			x_fwhm_pix = x_stddev_pix * 2*np.sqrt(2*np.log(2))
+			y_fwhm_pix = y_stddev_pix * 2*np.sqrt(2*np.log(2))
+			x_fwhm_arcsec = x_fwhm_pix * PLATE_SCALE
+			y_fwhm_arcsec = y_fwhm_pix * PLATE_SCALE
+			theta_rad = g.theta.value
+			source_x_fwhm_arcsec[j,i] = x_fwhm_arcsec
+			source_y_fwhm_arcsec[j,i] = y_fwhm_arcsec
+			source_theta_radians[j,i] = theta_rad
 
-				#DO PHOTOMETRY
-				#t1 = time.time()
-				phot_table = aperture_photometry(cutout, ap)
+			#print(time.time()-t1)
 
-				#Check for non-linear/saturated pixels in the aperture
-				max_pix = np.max(ap.to_mask().multiply(cutout))
-				if max_pix >= SATURATION_THRESHOLD:
-					saturated_flags[k,j,i] = 1
-				if max_pix >= NONLINEAR_THRESHOLD:
-					non_linear_flags[k,j,i] = 1
-
-				if live_plot and j == 0 and k == ap_plot_ind:
-					bins = np.arange(min(an_data),max(an_data)+2.5,2.5)
-					ax3.hist(an_data[an_data!=0],bins=bins,histtype='step',lw=2,color='tab:blue',label='Full distr.')
-					ax3.hist(v,bins=bins,label='Sigma-clipped distr.')
-					ax3.axvline(bkg,color='k',lw=2)
-					ax3.set_xlabel('ADU')
-					#ax3.set_ylabel('N$_{pix}$')
-					#ax3.legend()
-					ax3.set_title('Background')
-					ax3.set_xscale('log')
-
-				source_minus_sky_ADU[k,j,i] = phot_table['aperture_sum'][0]-bkg*ap.area 
-				source_minus_sky_e[k,j,i] = source_minus_sky_ADU[k,j,i]*GAIN
-
-				#Calculate uncertainty
-
-				#scintillation_rel = 1.5*0.09*(130)**(-2/3)*airmasses[i]**(7/4)*(2*EXPTIME)**(-1/2)*np.exp(-2306/8000)*np.sqrt(1+1/(len(targ_and_refs)-1)) #Follows equation 2 from Tierras SPIE paper
-				scintillation_abs_e = scintillation_rel * source_minus_sky_e[k,j,i] #Don't know if this should be multiplied by the average source flux or the flux in this frame
-				source_minus_sky_err_e[k,j,i] = np.sqrt(phot_table['aperture_sum'][0]*GAIN + bkg*ap.area*GAIN + DARK_CURRENT*source_header['EXPTIME']*ap.area + ap.area*READ_NOISE**2 + scintillation_abs_e**2)
-				source_minus_sky_err_ADU[k,j,i] = source_minus_sky_err_e[k,j,i]/GAIN
-
-				#Measure shape by fitting a 2D Gaussian to the cutout.
-				#Don't do for every aperture size, just do it once. 
-				if j == 0 and k == 0:
-					#g_2d_cutout = cutout[int(y_pos_cutout)-25:int(y_pos_cutout)+25,int(x_pos_cutout)-25:int(x_pos_cutout)+25]
-					#t1 = time.time()
-					g_2d_cutout = copy.deepcopy(cutout)
-					xx2,yy2 = np.meshgrid(np.arange(g_2d_cutout.shape[1]),np.arange(g_2d_cutout.shape[0]))
-					g_init = models.Gaussian2D(amplitude=g_2d_cutout[int(g_2d_cutout.shape[1]/2), int(g_2d_cutout.shape[0]/2)]-bkg,x_mean=g_2d_cutout.shape[1]/2,y_mean=g_2d_cutout.shape[0]/2, x_stddev=5, y_stddev=5)
-					fit_g = fitting.LevMarLSQFitter()
-					g = fit_g(g_init,xx2,yy2,g_2d_cutout-bkg)
-					
-					g.theta.value = g.theta.value % (2*np.pi) #Constrain from 0-2pi
-					if g.y_stddev.value > g.x_stddev.value: 
-						x_stddev_save = g.x_stddev.value
-						y_stddev_save = g.y_stddev.value
-						g.x_stddev = y_stddev_save
-						g.y_stddev = x_stddev_save
-						g.theta += np.pi/2
-
-					x_stddev_pix = g.x_stddev.value
-					y_stddev_pix = g.y_stddev.value 
-					x_fwhm_pix = x_stddev_pix * 2*np.sqrt(2*np.log(2))
-					y_fwhm_pix = y_stddev_pix * 2*np.sqrt(2*np.log(2))
-					x_fwhm_arcsec = x_fwhm_pix * PLATE_SCALE
-					y_fwhm_arcsec = y_fwhm_pix * PLATE_SCALE
-					theta_rad = g.theta.value
-					source_x_fwhm_arcsec[j,i] = x_fwhm_arcsec
-					source_y_fwhm_arcsec[j,i] = y_fwhm_arcsec
-					source_theta_radians[j,i] = theta_rad
-
-					#print(time.time()-t1)
-
-					# fig, ax = plt.subplots(1,2,figsize=(12,8),sharex=True,sharey=True)
-					# norm = ImageNormalize(g_2d_cutout-bkg,interval=ZScaleInterval())
-					# ax[0].imshow(g_2d_cutout-bkg,origin='lower',interpolation='none',norm=norm)
-					# ax[1].imshow(g(xx2,yy2),origin='lower',interpolation='none',norm=norm)
-					# plt.tight_layout()
-					# breakpoint()
-
-				#Plot normalized target source-sky as you go along
-				if live_plot and j == 0 and k == ap_plot_ind:
-					target_renorm_factor = np.nanmean(source_minus_sky_ADU[k,j,0:i+1])
-					targ_norm = source_minus_sky_ADU[k,j,0:i+1]/target_renorm_factor
-					targ_norm_err = source_minus_sky_err_ADU[k,j,0:i+1]/target_renorm_factor
-					
-					ax4.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),targ_norm,targ_norm_err,color='k',marker='.',ls='',ecolor='k',label='Normalized target flux')
-					#plt.ylim(380000,440000)
-					#ax4.set_ylabel('Normalized Flux')
+			# fig, ax = plt.subplots(1,2,figsize=(12,8),sharex=True,sharey=True)
+			# norm = ImageNormalize(g_2d_cutout-bkg,interval=ZScaleInterval())
+			# ax[0].imshow(g_2d_cutout-bkg,origin='lower',interpolation='none',norm=norm)
+			# ax[1].imshow(g(xx2,yy2),origin='lower',interpolation='none',norm=norm)
+			# plt.tight_layout()
+			# breakpoint()
 		
 		#Create ensemble ALCs (summed reference fluxes with no weighting) for each source
 		for l in range(len(targ_and_refs)):
@@ -1056,10 +1077,14 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			relative_flux_err[:,l] = np.sqrt((source_minus_sky_err_ADU[:,l]/ensemble_alc_ADU[:,l])**2+(source_minus_sky_ADU[:,l]*ensemble_alc_err_ADU[:,l]/(ensemble_alc_ADU[:,l]**2))**2)
 
 		if live_plot:
+			norm = np.median(source_minus_sky_ADU[ap_plot_ind,0,0:i+1])
+			targ_norm = source_minus_sky_ADU[ap_plot_ind,0,0:i+1] / norm
+			targ_norm_err = source_minus_sky_err_ADU[ap_plot_ind,0,0:i+1] / norm 
 			alc_renorm_factor = np.nanmean(ensemble_alc_ADU[ap_plot_ind,0,0:i+1]) #This means, grab the ALC associated with the ap_plot_ind'th aperture for the 0th source (the target) in all images up to and including this one.
 			alc_norm = ensemble_alc_ADU[ap_plot_ind,0,0:i+1]/alc_renorm_factor
 			alc_norm_err = ensemble_alc_err_ADU[ap_plot_ind,0,0:i+1]/alc_renorm_factor
 			v,l,h=sigmaclip(alc_norm[~np.isnan(alc_norm)])
+			ax4.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),targ_norm, targ_norm_err,color='k',marker='.',ls='',ecolor='k', label='Normalized target flux')
 			ax4.errorbar(bjd_tdb[0:i+1]-int(bjd_tdb[0]),alc_norm, alc_norm_err,color='r',marker='.',ls='',ecolor='r', label='Normalized ensemble ALC flux')
 			try:
 				ax4.set_ylim(l,h)
@@ -1145,8 +1170,8 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 		output_header.append('Dewpoint')
 		output_list.append([f'{val:.1f}' for val in sky_temps])
 		output_header.append('Sky Temperature')
-		#output_list.append([f'{val:.5f}' for val in lunar_distance])
-		#output_header.append('Lunar Distance')
+		output_list.append([f'{val:.5f}' for val in lunar_distance])
+		output_header.append('Lunar Distance')
 		output_list.append([f'{val:.1f}' for val in pressures])
 		output_header.append('Pressure')
 		output_list.append([f'{val:.1f}' for val in return_pressures])
@@ -1177,28 +1202,28 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			output_header.append(source_name+' Source-Sky ADU')
 			output_list.append([f'{val:.7f}' for val in source_minus_sky_err_ADU[i,j]])
 			output_header.append(source_name+' Source-Sky Error ADU')
-			output_list.append([f'{val:.7f}' for val in source_minus_sky_e[i,j]])
-			output_header.append(source_name+' Source-Sky e')
-			output_list.append([f'{val:.7f}' for val in source_minus_sky_err_e[i,j]])
-			output_header.append(source_name+' Source-Sky Error e')
+			# output_list.append([f'{val:.7f}' for val in source_minus_sky_e[i,j]])
+			# output_header.append(source_name+' Source-Sky e')
+			# output_list.append([f'{val:.7f}' for val in source_minus_sky_err_e[i,j]])
+			# output_header.append(source_name+' Source-Sky Error e')
 
 			output_list.append([f'{val:.7f}' for val in ensemble_alc_ADU[i,j]])
 			output_header.append(source_name+' Ensemble ALC ADU')
 			output_list.append([f'{val:.7f}' for val in ensemble_alc_err_ADU[i,j]])
 			output_header.append(source_name+' Ensemble ALC Error ADU')
 			output_list.append([f'{val:.7f}' for val in ensemble_alc_e[i,j]])
-			output_header.append(source_name+' Ensemble ALC e')
-			output_list.append([f'{val:.7f}' for val in ensemble_alc_err_e[i,j]])
-			output_header.append(source_name+' Ensemble ALC Error e')
-			output_list.append([f'{val:.10f}' for val in relative_flux[i,j]])
+			# output_header.append(source_name+' Ensemble ALC e')
+			# output_list.append([f'{val:.7f}' for val in ensemble_alc_err_e[i,j]])
+			# output_header.append(source_name+' Ensemble ALC Error e')
+			# output_list.append([f'{val:.10f}' for val in relative_flux[i,j]])
 			output_header.append(source_name+' Relative Flux')
 			output_list.append([f'{val:.10f}' for val in relative_flux_err[i,j]])
 			output_header.append(source_name+' Relative Flux Error')
 
 			output_list.append([f'{val:.7f}' for val in source_sky_ADU[j]])
 			output_header.append(source_name+' Sky ADU')
-			output_list.append([f'{val:.7f}' for val in source_sky_e[j]])
-			output_header.append(source_name+' Sky e')
+			# output_list.append([f'{val:.7f}' for val in source_sky_e[j]])
+			# output_header.append(source_name+' Sky e')
 
 			output_list.append([f'{val:.4f}' for val in source_x_fwhm_arcsec[j]])
 			output_header.append(source_name+' X FWHM Arcsec')
@@ -2067,11 +2092,15 @@ def set_tierras_permissions(path):
 		print(f'Could not change permissions on {path}, returning.')
 	return 
 
-def get_lunar_distance(ra, dec, time):
+def get_lunar_distance(ra, dec, time, loc=coord.EarthLocation.of_site('Whipple')):
+	#TODO: NOT POSITIVE THIS IS RIGHT!
 	astropy_time = Time(time, format='jd', scale='tdb')
 	field_coord = SkyCoord(ra,dec, unit=(u.hourangle, u.deg))
-	moon_coord = get_moon(astropy_time,location=coord.EarthLocation.of_site('Whipple'))
-	return field_coord.separation(moon_coord).value
+	moon_coord = get_body('moon', astropy_time, location=loc)
+	field_coord_alt_az = field_coord.transform_to(AltAz(obstime=astropy_time, location=loc))
+	moon_alt_az = moon_coord.transform_to(AltAz(obstime=astropy_time, location=loc))
+	moon_radec = moon_alt_az.transform_to('icrs')
+	return field_coord_alt_az.separation(moon_alt_az).value
 
 def t_or_f(arg):
 	ua = str(arg).upper()
@@ -2402,7 +2431,7 @@ def lc_post_processing(date, target, ffname,overwrite=False):
 				weighted_alc_errs[:,j] = alc_err
 				
 				#Insert the new columns into the dataframe.
-				ind1 = int(np.where(df.keys() == f'{targ} Ensemble ALC Error e')[0][0]+1)
+				ind1 = int(np.where(df.keys() == f'{targ} Ensemble ALC Error ADU')[0][0]+1)
 				try:
 					df.insert(ind1, f'{targ} Weighted ALC ADU',  weighted_alcs[:,j])
 				except:

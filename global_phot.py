@@ -6,6 +6,7 @@ import copy
 from scipy.stats import sigmaclip
 import matplotlib.pyplot as plt 
 plt.ion()
+from ap_phot import tierras_binner
 
 '''
 	Scripts for doing global light curves of Tierras targets
@@ -90,7 +91,7 @@ def make_global_lists(mainpath,targetname,ffname,exclude_dates=[], ap_radius='op
 	bjd_save = []
 	lcfolderlist = np.sort(glob(mainpath+"/**/"+target))
 	lcdatelist = [lcfolderlist[ind].split("/")[4] for ind in range(len(lcfolderlist))] 
-	breakpoint()
+
 	for ii,lcfolder in enumerate(lcfolderlist):
 		print("Processing", lcdatelist[ii])
 
@@ -233,6 +234,7 @@ def make_global_lists(mainpath,targetname,ffname,exclude_dates=[], ap_radius='op
 			full_y_pos = y 
 			full_fwhm_x = fwhm_x
 			full_fwhm_y = fwhm_y
+			full_sky = sky
 		else:
 			full_flux = np.concatenate((full_flux, flux), axis=1) 
 			full_flux_err = np.concatenate((full_flux_err, err), axis=1)
@@ -240,6 +242,7 @@ def make_global_lists(mainpath,targetname,ffname,exclude_dates=[], ap_radius='op
 			full_y_pos = np.concatenate((full_y_pos, y), axis=1)
 			full_fwhm_x = np.concatenate((full_fwhm_x, fwhm_x),axis=1)
 			full_fwhm_y = np.concatenate((full_fwhm_y, fwhm_y),axis=1)
+			full_sky = np.concatenate((full_sky, sky), axis=1)
 
 	# convert from lists to arrays
 	full_bjd = np.array(full_bjd)
@@ -291,10 +294,9 @@ def make_global_lists(mainpath,targetname,ffname,exclude_dates=[], ap_radius='op
 
 	return  output_dict
 
-def mearth_style_pat_weighted(data_dict, cluster_ids):
+def mearth_style_pat_weighted(data_dict):
 	""" Use the comparison stars to derive a frame-by-frame zero-point magnitude. Also filter and mask bad cadences """
 	""" it's called "mearth_style" because it's inspired by the mearth pipeline """
-	cluster_ids = np.array(cluster_ids)
 
 	bjds = data_dict['BJD']
 	flux = data_dict['Flux']
@@ -311,16 +313,18 @@ def mearth_style_pat_weighted(data_dict, cluster_ids):
 	weights_save = np.zeros((len(flux),len(flux)-1))
 
 	# loop over each star, calculate its zero-point correction using the other stars
+	
 	for i in range(len(flux)):
-		target_source_id = cluster_ids[i] # this represents the ID of the "target" *in the photometry files
+		print(i)
+		target_source_id = i # this represents the ID of the "target" *in the photometry files
 		regressor_inds = [j for j in np.arange(len(flux)) if i != j] # get the indices of the stars to use as the zero point calibrators; these represent the indices of the calibrators *in the data_dict arrays*
-		regressor_source_ids = cluster_ids[regressor_inds] # these represent the IDs of the calibrators *in the photometry files*  
+		regressor_source_ids = np.arange(len(flux))[regressor_inds] # these represent the IDs of the calibrators *in the photometry files*  
 
 		# grab target and source fluxes and apply initial mask 
 		target_flux = data_dict['Flux'][i]
 		target_flux_err = data_dict['Flux Error'][i]
 		regressors = data_dict['Flux'][regressor_inds]
-		regressors_err = data_dict['Flux'][regressor_inds]
+		regressors_err = data_dict['Flux Error'][regressor_inds]
 
 		target_flux[~mask] = np.nan 
 		target_flux_err[~mask] = np.nan 
@@ -333,7 +337,10 @@ def mearth_style_pat_weighted(data_dict, cluster_ids):
 		c0s = -2.5*np.log10(np.nanpercentile(tot_regressor, 90)/tot_regressor)  # initial guess of magnitude zero points
 		
 		mask = np.ones_like(c0s, dtype='bool')  # initialize another bad data mask
-		mask[np.where(c0s < -0.24)[0]] = 0  # if regressor flux is decremented by 20% or more, this cadence is bad
+		
+		# mask[np.where(c0s < -0.24)[0]] = 0  # if regressor flux is decremented by 20% or more, this cadence is bad
+
+		mask[np.where(c0s < -0.753)[0]] = 0  # if regressor flux is decremented by 50% or more, this cadence is bad (10**(-.753/2.5) = 0.5)
 
 		target_flux[~mask] = np.nan 
 		target_flux_err[~mask] = np.nan 
@@ -402,7 +409,7 @@ def mearth_style_pat_weighted(data_dict, cluster_ids):
 
 		# the noise ratio threshold will depend on how many bad/variable reference stars were used in the ALC
 		# sigmaclip the noise ratios and set the upper limit to the n-sigma upper bound 
-		v, l, h = sigmaclip(noise_ratios, 2, 2)
+		v, l, h = sigmaclip(noise_ratios, 1.5, 1.5)
 		weights[np.where(noise_ratios>h)[0]] = 0
 		weights /= sum(weights)
 		
@@ -436,6 +443,18 @@ def mearth_style_pat_weighted(data_dict, cluster_ids):
 
 		weights = weights_new
 		
+		# # determine if any references should be totally thrown out based on the ratio of their measured/expected noise
+		# regressors_err_norm = (regressors_err.T / np.nanmedian(regressors,axis=1)).T
+		# noise_ratios = stddevs / np.nanmedian(regressors_err_norm)      
+
+		# # the noise ratio threshold will depend on how many bad/variable reference stars were used in the ALC
+		# # sigmaclip the noise ratios and set the upper limit to the n-sigma upper bound 
+		# v, l, h = sigmaclip(noise_ratios, 2, 2)
+		# breakpoint()
+		# weights[np.where(noise_ratios>h)[0]] = 0
+		# weights /= sum(weights)
+		# breakpoint()
+		
 		# calculate the zero-point correction
 		cs = -2.5*np.log10(phot_regressor[:,None]/regressors)
 		cs = np.matmul(weights, cs)
@@ -456,13 +475,27 @@ def mearth_style_pat_weighted(data_dict, cluster_ids):
 	output_dict['Corrected Flux'] = flux_corr_save
 	output_dict['Corrected Flux Error'] = flux_err_corr_save
 	output_dict['Weights'] = weights_save
+	
+	times = output_dict['BJD']
+	
+	night_inds = np.zeros(len(times), dtype='int') # create array for tagging the different nights
 
+	for i in range(len(output_dict['BJD List'])):
+		use_inds = np.where((times>=output_dict['BJD List'][i][0])&(times<=output_dict['BJD List'][i][-1]))[0]
+		night_inds[use_inds] = i 
+
+	output_dict.pop('BJD List')
+	output_dict['Night Index'] = night_inds
 	return output_dict
 
 if __name__ == '__main__':
 	target = 'TIC384984325'
 	data_path = '/data/tierras/lightcurves/'
 	ffname = 'flat0000'
-	ap_radius = 8
+	ap_radius = 12
 	
 	data_dict = make_global_lists(data_path, target, ffname, ap_radius=ap_radius)
+
+	corr_data_dict = mearth_style_pat_weighted(data_dict)
+	
+	breakpoint()
