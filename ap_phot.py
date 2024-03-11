@@ -51,6 +51,7 @@ import batman
 from glob import glob
 import pickle
 import shutil
+import warnings
 
 def get_flattened_files(date, target, ffname):
 	#Get a list of data files sorted by exposure number
@@ -603,7 +604,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
 
-	# file_list = file_list[-3:] #TESTING!!!
+	# file_list = file_list[167:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
@@ -851,21 +852,27 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 		# breakpoint()
 
 		source_positions = [(source_x[j,i], source_y[j,i]) for j in range(len(targ_and_refs))]
+
+		if (sum(source_x[:,i] < 0) + sum(source_y[:,i] < 0) + sum(source_x[:,i] > source_data.shape[1]) + sum(source_y[:,i] > source_data.shape[0])) > 0:
+			warnings.warn('Sources off chip! Skipping photometry.')
+			continue 
+
 		if centroid:
 			# mask any pixels in the image above the non-linear threshold
 			mask = np.zeros(np.shape(source_data), dtype='bool')
 			mask[np.where(source_data>NONLINEAR_THRESHOLD)] = 1
 
-			centroid_x, centroid_y = centroid_sources(source_data,source_x[:,i], source_y[:,i], centroid_func=centroid_2dg, footprint=centroid_footprint, mask=mask)
-			
+			centroid_x, centroid_y = centroid_sources(source_data,source_x[:,i], source_y[:,i], centroid_func=centroid_2dg, footprint=centroid_footprint, mask=mask)	
 			# update source positions
 			source_x[:,i] = centroid_x 
 			source_y[:,i] = centroid_y
-			source_positions = [(source_x[j,i], source_y[j,i]) for j in range(len(targ_and_refs))]
-
 			# fig, ax = plot_image(source_data)
 			# ax.scatter(centroid_x, centroid_y, color='b', marker='x')
 			# breakpoint()
+			
+			source_positions = [(source_x[j,i], source_y[j,i]) for j in range(len(targ_and_refs))]
+	
+			
 
 		# Do photometry
 		# Set up apertures

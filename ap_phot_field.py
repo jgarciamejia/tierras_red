@@ -98,7 +98,7 @@ def do_all_photometry(file_list, target, ap_radii, an_in, an_out, centroid=True,
 		Does photometry for *all* objects in a Tierras field. 
 	'''
 	# Query the field for sources in Gaia, cross-match with 2MASS
-	sources = tierras_gaia_crossmatch(target, rp_mag_limit=17)
+	sources = tierras_gaia_crossmatch(target, rp_mag_limit=21)
 
 	ffname = file_list[0].parent.name	
 	target = file_list[0].parent.parent.name
@@ -495,7 +495,7 @@ def do_all_photometry(file_list, target, ap_radii, an_in, an_out, centroid=True,
 
 
 
-def tierras_gaia_crossmatch(target, rp_mag_limit=17):
+def tierras_gaia_crossmatch(target, rp_mag_limit=21):
 	'''
 		Search for objects in a Tierras field in Gaia DR3 out to rp_mag_limit. Code will cross match with 2MASS. 
 	'''
@@ -590,9 +590,9 @@ def tierras_gaia_crossmatch(target, rp_mag_limit=17):
 	bad_inds = np.where((res['Y pix'] > 1007) & (res['X pix'] > 1021) & (res['X pix'] < 1035))[0]
 	res.remove_rows(bad_inds)
 
-	# fig, ax = plot_image(data)
-	# ax.plot(res['X pix'],res['Y pix'],'rx')
-	# breakpoint()
+	fig, ax = plot_image(data)
+	ax.plot(res['X pix'],res['Y pix'],'rx')
+	breakpoint()
 
 	return res
 
@@ -1062,7 +1062,7 @@ def main(raw_args=None):
 	ap.add_argument("-ffname", required=True, help="Name of folder in which to store reduced+flattened data. Convention is flatXXXX. XXXX=0000 means no flat was used.")
 	ap.add_argument("-centroid",required=False,default=True,help="Whether or not to centroid during aperture photometry.",type=str)
 	ap.add_argument("-ap_radius_low",required=False,default=5,help="Smallest aperture radius to try. All radii with sizes between ap_radius_low and ap_radius_high will be generated.")
-	ap.add_argument("-ap_radius_high",required=False,default=15,help="Largest aperture radius to try. All radii with sizes between ap_radius_low and ap_radius_high will be generated.")
+	ap.add_argument("-ap_radius_high",required=False,default=20,help="Largest aperture radius to try. All radii with sizes between ap_radius_low and ap_radius_high will be generated.")
 	ap.add_argument("-an_in",required=False,default=35,help="Inner background annulus radius.")
 	ap.add_argument("-an_out",required=False,default=65,help="Outer background annulus radius.")
 	args = ap.parse_args(raw_args)
