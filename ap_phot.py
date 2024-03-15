@@ -725,7 +725,10 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 
 	reference_image_header = reference_image_hdu.header
 	reference_wcs = WCS(reference_image_header)
-	reference_world_coordinates = [reference_wcs.pixel_to_world(targ_and_refs['x'][i],targ_and_refs['y'][i]) for i in range(len(targ_and_refs))] #Get world coordinates of target and reference stars in the reference image. 
+	try:
+		reference_world_coordinates = [reference_wcs.pixel_to_world(targ_and_refs['X pix'][i],targ_and_refs['Y pix'][i]) for i in range(len(targ_and_refs))] #Get world coordinates of target and reference stars in the reference image. 
+	except:
+		reference_world_coordinates = [reference_wcs.pixel_to_world(targ_and_refs['x'][i],targ_and_refs['y'][i]) for i in range(len(targ_and_refs))] #Get world coordinates of target and reference stars in the reference image. 
 
 	#reference_image_data = np.ma.array(reference_image_hdu.data, mask=bpm)
 	reference_image_data = reference_image_hdu.data
@@ -1885,8 +1888,10 @@ def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 
 		reference_image_header = reference_image_hdu.header
 		reference_wcs = WCS(reference_image_header)
-		#TODO: this crashed after first creation of reference star file and I don't know why
-		reference_world_coordinates = reference_wcs.pixel_to_world(targ_and_refs['x'][0],targ_and_refs['y'][0]) #Get world coordinates of target in the reference image.
+		try:
+			reference_world_coordinates = reference_wcs.pixel_to_world(targ_and_refs['X pix'][0], targ_and_refs['Y pix'][0])
+		except:
+			reference_world_coordinates = reference_wcs.pixel_to_world(targ_and_refs['x'][0],targ_and_refs['y'][0]) #Get world coordinates of target in the reference image.
 
 		fwhm_x = np.zeros(len(file_list))
 		fwhm_y = np.zeros(len(file_list))
