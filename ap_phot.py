@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import logging
 import numpy as np 
 np.seterr(divide='ignore', invalid='ignore')
 import pandas as pd
@@ -52,6 +53,9 @@ from glob import glob
 import pickle
 import shutil
 import warnings
+
+# Suppress all Astropy warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="astropy")
 
 def get_flattened_files(date, target, ffname):
 	#Get a list of data files sorted by exposure number
@@ -562,16 +566,16 @@ def jd_utc_to_bjd_tdb(jd_utc, ra, dec, location='Whipple'):
 	return (input_jd_utc.tdb + ltt_bary).value
 
 def circular_footprint(radius, dtype=int):
-    """
+	"""
 	TAKEN DIRECTLY FROM PHOTUTILS!!!
-    """
-    if ~np.isfinite(radius) or radius <= 0 or int(radius) != radius:
-        raise ValueError('radius must be a positive, finite integer greater '
-                         'than 0')
+	"""
+	if ~np.isfinite(radius) or radius <= 0 or int(radius) != radius:
+		raise ValueError('radius must be a positive, finite integer greater '
+						 'than 0')
 
-    x = np.arange(-radius, radius + 1)
-    xx, yy = np.meshgrid(x, x)
-    return np.array((xx**2 + yy**2) <= radius**2, dtype=dtype)
+	x = np.arange(-radius, radius + 1)
+	xx, yy = np.meshgrid(x, x)
+	return np.array((xx**2 + yy**2) <= radius**2, dtype=dtype)
 
 def generate_square_cutout(image, position, size):
 	height, width = image.shape
@@ -598,20 +602,91 @@ def generate_square_cutout(image, position, size):
 
 	return cutout, position_in_cutout
 
-def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, an_out=60, centroid=False, live_plot=False, type='fixed', bkg_type='1d'):
+def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., an_out=60., type='fixed', centroid=False, centroid_type='centroid_2dg', bkg_type='1d', live_plot=False):
+	"""
+	Does circular aperture photometry on a target and set of reference stars in a list of reduced Tierras images for an array of aperture sizes. Writes out photometry csv files to /data/tierras/lightcurves/date/target/ffname/.
+
+	Parameters:
+	file_list (list): List of paths to reduced Tierras images. Generate with get_flattened_files.
+	targ_and_refs (pandas DataFrame): DataFrame containing information about the target and reference stars. By convention, the target is the first target in this DataFrame. Generate with reference_star_chooser.
+	ap_radii (list): List of circular aperture radii that you want to perform photometry for. See the 'type' parameter for how this input is interpreted. One output photometry file will be created for each radius in the list. 
+	an_in (float): Inner annulus radius (in pixels) for measuring sky background around each source. This parameter only has an effect when bkg_type == '1d'.
+	an_out (float): Outer annulus radius (in pixels) for measuring sky background around each source. This parameter only has an effect when bkg_type == '1d'. 
+	type (str): The type of aperture photometry to perform, 'fixed' or 'variable'. If 'fixed', ap_radii is interpreted as a list of circular aperture radii (in pixels). If 'variable', ap_radii is interpreted as a list of multiplicative factors times the FWHM seeing in the images (i.e., the aperture radii will vary in time in accordance with seeing changes). 
+	centroid (bool): Whether or not to perform centroiding on expected source positions. 
+	centroid_type (str): The photutils centroiding function to use for centroiding if centroid == True. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'. 
+	bkg_type (str): The method to use for measuring the sky background around each source. If '1d', it will use the sigma-clipped mean of pixels falling within the annulus specified by an_in and an_out (using a 2-sigma clipping threshold). If '2d', it will perform a 2D model of the background, and measure the background in the source annulus by performing aperture photometry on the 2D model. 
+	live_plot (bool): Whether or not to plot photometry as you go along. 
+	
+	Returns:
+	None
+	"""
+
+	# set up centroid function
+	if centroid:
+		centroid_type = centroid_type.lower()
+		if centroid_type == 'centroid_1dg':
+			centroid_func = centroid_1dg
+		elif centroid_type == 'centroid_2dg':
+			centroid_func = centroid_2dg
+		elif centroid_type == 'centroid_com':
+			centroid_func = centroid_com
+		elif centroid_type == 'centroid_quadratic':
+			centroid_func = centroid_quadratic
+		else:
+			raise RuntimeError("centroid_type must be one of 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.")
+
+	bkg_type = bkg_type.lower()
+	if (bkg_type != '1d') and (bkg_type != '2d'):
+		raise RuntimeError("bkg_type must be '1d' or '2d'.")
 
 	ffname = file_list[0].parent.name	
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
+	
+	# set up logger
+	log_path = Path('/data/tierras/lightcurves/'+date+'/'+target+'/'+ffname+f'/circular_{type}_ap_phot.log')
 
+	# create logger
+	logger = logging.getLogger(__name__)
+	logger.setLevel(logging.DEBUG)
+
+	# create console handler and set level to debug
+	ch = logging.StreamHandler()
+	ch.setLevel(logging.DEBUG)
+
+	# create formatter
+	formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+	# add formatter to ch
+	ch.setFormatter(formatter)
+
+	# add ch to logger
+	logger.addHandler(ch)	
+	
+	fh = logging.FileHandler(log_path, mode='w')
+	fh.setFormatter(formatter)
+	logger.addHandler(fh)
+
+	# log input params
+	logger.info(f'Target: {target}')
+	logger.info(f'Date: {date}')
+	logger.info(f'ffname: {ffname}')
+	logger.info(f'Photometry type: {type}')
+	logger.info(f'Ap radii: {ap_radii}')
+	logger.info(f'Bkg type: {bkg_type}')
+	if bkg_type == '1d':
+		logger.info(f'An in: {an_in}')
+		logger.info(f'An out: {an_out}')
+	logger.info(f'Centroid: {centroid}')
+	if centroid:
+		logger.info(f'Centroid function: {centroid_type}')
 	# file_list = file_list[167:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
 	SATURATION_THRESHOLD = 55000. #ADU
-	PLATE_SCALE = 0.43 #arcsec pix^-1, from Juliana's dissertation Table 1.1
-
-	centroid_mask_half_l = 11 #If centroiding is performed, a box of size 2*centroid_mask_half_l x 2*centroid_mask_half_l is used to mask out around the source's expected position (reduces chance of measuring a bad centroid)
+	PLATE_SCALE = 0.432 #arcsec pix^-1, from Juliana's dissertation Table 1.1
 	
 	#If doing variable aperture photometry, read in FWHM X/Y data and set aperture radii 
 	if type == 'variable':
@@ -757,16 +832,17 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 
 	# declare a circular footprint in case centroiding is performed
 	# only data within a radius of x pixels around the expected source positions from WCS will be considered for centroiding
-	centroid_footprint = circular_footprint(7)
+	centroid_footprint = circular_footprint(5)
 
-	print(f'Doing fixed-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.\n')
+	logger.info(f'Doing fixed-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.\n')
 	time.sleep(2)
 	for i in range(n_files):
 		if i > 0:
 			loop_times[i-1]= time.time()-t1
-			print(f'Avg loop time = {np.mean(loop_times[0:i]):.2f}s')
+			logger.info(f'Avg loop time = {np.mean(loop_times[0:i]):.2f}s')
 		t1 = time.time()
-		print(f'{i+1} of {n_files}')
+		
+		logger.info(f'{file_list[i].name} ({i+1} of {n_files})')
 		source_hdu = fits.open(file_list[i])[0]
 		source_header = source_hdu.header
 		source_data = source_hdu.data #TODO: Should we ignore BPM pixels?
@@ -865,13 +941,17 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40, a
 			mask = np.zeros(np.shape(source_data), dtype='bool')
 			mask[np.where(source_data>NONLINEAR_THRESHOLD)] = 1
 
-			centroid_x, centroid_y = centroid_sources(source_data,source_x[:,i], source_y[:,i], centroid_func=centroid_2dg, footprint=centroid_footprint, mask=mask)	
+			# fig, ax = plot_image(source_data)
+			# ax.scatter(source_x[:,i], source_y[:,i], marker='x', color='b')
+			centroid_x, centroid_y = centroid_sources(source_data,source_x[:,i], source_y[:,i], centroid_func=centroid_func, footprint=centroid_footprint, mask=mask)	
+			
+			# ax.scatter(centroid_x, centroid_y, marker='x', color='r')
+			# breakpoint()
+			# plt.close()
+
 			# update source positions
 			source_x[:,i] = centroid_x 
 			source_y[:,i] = centroid_y
-			# fig, ax = plot_image(source_data)
-			# ax.scatter(centroid_x, centroid_y, color='b', marker='x')
-			# breakpoint()
 			
 			source_positions = [(source_x[j,i], source_y[j,i]) for j in range(len(targ_and_refs))]
 	
