@@ -653,7 +653,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 
 	# create console handler and set level to debug
 	ch = logging.StreamHandler()
-	ch.setLevel(logging.DEBUG)
+	ch.setLevel(logging.INFO)
 
 	# create formatter
 	formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -820,8 +820,8 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 	n_files = len(file_list)
 	if live_plot:
 		#fig, ax = plt.subplots(2,2,figsize=(16,9))
-		# ap_plot_ind = int(len(ap_radii)/2) #Set the central aperture as the one to plot
-		ap_plot_ind = np.where(np.array(ap_radii) == 15)[0][0]
+		ap_plot_ind = int(len(ap_radii)/2) #Set the central aperture as the one to plot
+		# ap_plot_ind = np.where(np.array(ap_radii) == 15)[0][0]
 		fig = plt.figure(figsize=(13,7))
 		gs = gridspec.GridSpec(2,4,figure=fig)
 		ax1 = fig.add_subplot(gs[0,0:2])
@@ -839,7 +839,8 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 	for i in range(n_files):
 		if i > 0:
 			loop_times[i-1]= time.time()-t1
-			logger.info(f'Avg loop time = {np.mean(loop_times[0:i]):.2f}s')
+			logger.debug(f'Avg loop time = {np.mean(loop_times[0:i]):.2f}s')
+			logger.debug('')
 		t1 = time.time()
 		
 		logger.info(f'{file_list[i].name} ({i+1} of {n_files})')
@@ -936,6 +937,8 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 			warnings.warn('Sources off chip! Skipping photometry.')
 			continue 
 
+		logger.debug(f'Source x (WCS): {[f"{item:.2f}" for item in source_x[:,i]]}')
+		logger.debug(f'Source y (WCS): {[f"{item:.2f}" for item in source_y[:,i]]}')
 		if centroid:
 			# mask any pixels in the image above the non-linear threshold
 			mask = np.zeros(np.shape(source_data), dtype='bool')
@@ -952,6 +955,9 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 			# update source positions
 			source_x[:,i] = centroid_x 
 			source_y[:,i] = centroid_y
+
+			logger.debug(f'Source x (centroid): {[f"{item:.2f}" for item in source_x[:,i]]}')
+			logger.debug(f'Source y (centroid): {[f"{item:.2f}" for item in source_y[:,i]]}')
 			
 			source_positions = [(source_x[j,i], source_y[j,i]) for j in range(len(targ_and_refs))]
 	
@@ -1121,7 +1127,11 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 			# ax[1].imshow(g(xx2,yy2),origin='lower',interpolation='none',norm=norm)
 			# plt.tight_layout()
 			# breakpoint()
-		
+	
+		logger.debug(f'Major FWHM (arcsec): {[f"{item:.2f}" for item in source_x_fwhm_arcsec[:,i]]}')
+		logger.debug(f'Minor FWHM (arcsec): {[f"{item:.2f}" for item in source_y_fwhm_arcsec[:,i]]}')
+		logger.debug(f'Theta (rad): {[f"{item:.2f}" for item in source_theta_radians[:,i]]}')
+
 		#Create ensemble ALCs (summed reference fluxes with no weighting) for each source
 		for l in range(len(targ_and_refs)):
 			#For the target, use all reference stars
@@ -1183,7 +1193,6 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 			ax3.cla()
 			ax4.cla()
 			ax5.cla()
-
 	#Write out photometry. 
 	for i in range(len(ap_radii)):
 		output_path = Path('/data/tierras/lightcurves/'+date+'/'+target+'/'+ffname+f'/circular_{type}_ap_phot_{ap_radii[i]}.csv')
@@ -2611,6 +2620,10 @@ def main(raw_args=None):
 	ap.add_argument("-date", required=True, help="Date of observation in YYYYMMDD format.")
 	ap.add_argument("-target", required=True, help="Name of observed target exactly as shown in raw FITS files.")
 	ap.add_argument("-ffname", required=True, help="Name of folder in which to store reduced+flattened data. Convention is flatXXXX. XXXX=0000 means no flat was used.")
+	ap.add_argument("-ap_rad_lo", required=False, default=5, help="Lower bound of aperture radii in pixels. Apertures with sizes between ap_rad_lo and ap_rad_hi will be used.", type=float)
+	ap.add_argument("-ap_rad_hi", required=False, default=20, help="Upper bound of aperture radii in pixels. Apertures with sizes between ap_rad_lo and ap_rad_hi will be used.", type=float)
+	ap.add_argument("-an_in", required=False, default=35, help='Inner background annulus radius in pixels.', type=float)
+	ap.add_argument("-an_out", required=False, default=55, help='Outer background annulus radius in pixels.', type=float)
 	ap.add_argument("-target_position_x",required=False,default=0,help="User-specified x target position in pixel coordinates.",type=float)
 	ap.add_argument("-target_position_y",required=False,default=0,help="User-specified y target position in pixel coordinates.",type=float)
 	ap.add_argument("-nearness_limit",required=False,default=15,help="Minimum separation a source has to have from all other sources to be considered as a reference star.",type=float)
@@ -2619,8 +2632,9 @@ def main(raw_args=None):
 	ap.add_argument("-targ_distance_limit",required=False,default=2000,help="Maximum distance a source can be from the target in pixels to be considered as a reference star.",type=float)
 	ap.add_argument("-overwrite_refs",required=False,default=False,help="Whether or not to overwrite previous reference star output.",type=str)
 	ap.add_argument("-centroid",required=False,default=True,help="Whether or not to centroid during aperture photometry.",type=str)
+	ap.add_argument("-centroid_type",required=False,default='centroid_2dg',help="Photutils centroid function. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.",type=str)
 	ap.add_argument("-live_plot",required=False,default=True,help="Whether or not to plot the photometry as it is performed.",type=str)
-
+	ap.add_argument("-bkg_type", required=False, default='1d', help="Background type. Can be '1d' or '2d'. If '1d', the backgroudn will be measured as the sigma-clipped mean of pixels in a circular annulus surrounding each source, with the annulus defined by the an_in and an_out params. If '2d', it will be measured using a 2D model of the background.")
 	args = ap.parse_args(raw_args)
 
 	#Access observation info
@@ -2629,6 +2643,11 @@ def main(raw_args=None):
 	ffname = args.ffname
 	target_position_x = args.target_position_x
 	target_position_y = args.target_position_y
+	ap_rad_lo = args.ap_rad_lo 
+	ap_rad_hi = args.ap_rad_hi 
+	ap_radii = np.arange(ap_rad_lo, ap_rad_hi + 1)
+	an_in = args.an_in 
+	an_out = args.an_out 
 
 	nearness_limit = args.nearness_limit
 	edge_limit = args.edge_limit
@@ -2636,7 +2655,9 @@ def main(raw_args=None):
 	targ_distance_limit = args.targ_distance_limit
 	overwrite_refs = t_or_f(args.overwrite_refs)
 	centroid = t_or_f(args.centroid)
+	centroid_type = args.centroid_type
 	live_plot = t_or_f(args.live_plot)
+	bkg_type = args.bkg_type
 
 	make_data_dirs(date, target, ffname)
 
@@ -2647,16 +2668,16 @@ def main(raw_args=None):
 	flattened_files = get_flattened_files(date, target, ffname)
 
 	#Select target and reference stars
-	targ_and_refs = reference_star_chooser(flattened_files, mode='manual', plot=True, nearness_limit=nearness_limit, edge_limit=edge_limit,dimness_limit=dimness_limit, targ_distance_limit=targ_distance_limit, overwrite=overwrite_refs,target_position=(target_position_x,target_position_y))
+	targ_and_refs = reference_star_chooser(flattened_files, plot=True, nearness_limit=nearness_limit, edge_limit=edge_limit,dimness_limit=dimness_limit, targ_distance_limit=targ_distance_limit, overwrite=overwrite_refs,target_position=(target_position_x,target_position_y))
 
 	#Determine which aperture sizes to use for photometry
-	ap_radii, an_in, an_out = ap_range(flattened_files, targ_and_refs)
+	# ap_radii, an_in, an_out = ap_range(flattened_files, targ_and_refs)
 
 	#Do photometry
-	circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=an_in, an_out=an_out, centroid=centroid, live_plot=live_plot)
+	circular_aperture_photometry(flattened_files, targ_and_refs, ap_radii, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, live_plot=live_plot, bkg_type=bkg_type)
 
 	#Determine the optimal aperture size
-	optimal_lc_path = lc_post_processing(date, target, ffname)
+	optimal_lc_path = lc_post_processing(date, target, ffname, overwrite=True)
 	#optimal_lc_path = optimal_lc_chooser(date,target,ffname,plot=True,start_time=0,stop_time=0)
 	print(f'Optimal light curve: {optimal_lc_path}')
 	
