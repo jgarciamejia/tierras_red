@@ -23,16 +23,14 @@ def create_directories(basepath,date,target,folder1):
     if not os.path.exists(datepath):
         logging.info('Creating {} Directory'.format(datepath))
         os.system('mkdir {}'.format(datepath))
-        os.system('chmod g+rwx {}'.format(datepath))
-        os.system('chmod g+rwx {}/*'.format(datepath))
+        os.system('chmod g+rwxs {}'.format(datepath))
         
     if not os.path.exists(targetpath):
         logging.info('Creating {} Directory'.format(targetpath))
         os.system('mkdir {}'.format(targetpath))
         os.system('chmod g+rwx {}'.format(targetpath))
         os.system('mkdir {}'.format(folder1path))
-        os.system('chmod g+rwx {}'.format(folder1path))
-        os.system('chmod g+rwx {}/*'.format(folder1path))
+        os.system('chmod g+rwxs {}'.format(folder1path))
 
     return folder1path
 
@@ -78,7 +76,8 @@ def main():
     targets = get_target_list(os.path.join(ipath,date))
 
     for target in targets:
-        if os.path.exists(os.path.join(fpath,date,target,ffname))
+        if os.path.exists(os.path.join(fpath,date,target,ffname)):
+            print ('{} exists : skipped'.format(os.path.join(fpath,date,target,ffname)))
             continue
         # Create flattened file and light curve directories 
         ffolder = create_directories(fpath,date,target,ffname)
