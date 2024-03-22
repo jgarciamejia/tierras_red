@@ -786,8 +786,6 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 		if (source_header['STDCRMS'] > PLATE_SCALE/2):
 			logger.info(f'WARNING: header indicates astrometric solution with RMS of {source_header["STDCRMS"]}, WCS positions may not be accurate.')
 			wcs_flags[i] = 1
-			breakpoint()
-
 
 		transformed_pixel_coordinates = np.array([source_wcs.world_to_pixel((SkyCoord(sources['ra_tierras'][i]*u.deg, sources['dec_tierras'][i]*u.deg))) for i in range(len(sources))])
 		
@@ -1065,6 +1063,8 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 		output_header.append('Wind Gust')
 		output_list.append([f'{val:.1f}' for val in wind_dirs])
 		output_header.append('Wind Direction')
+		output_list.append([f'{val:d}' for val in wcs_flags])
+		output_header.append('WCS Flag')
 
 		for j in range(len(sources)):
 			source_name = f'S{j+1}'
@@ -2474,3 +2474,4 @@ def main(raw_args=None):
 if __name__ == '__main__':
 	main()
 	
+  
