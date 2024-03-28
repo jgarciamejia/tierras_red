@@ -60,7 +60,7 @@ from etc_pat import etc
 # Suppress all Astropy warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="astropy")
 
-def get_flattened_files(date, target, ffname, logger):
+def get_flattened_files(date, target, ffname):
 	#Get a list of data files sorted by exposure number
 	'''
 		PURPOSE: 
@@ -81,7 +81,7 @@ def get_flattened_files(date, target, ffname, logger):
 	sorted_files = np.array(sorted(red_files, key=lambda x: int(x.split('.')[1])))
 	sorted_files = np.array([Path(i) for i in sorted_files])
 
-	logger.debug(f'Found {len(sorted_files)} files for {target} on {date}')
+	# logger.debug(f'Found {len(sorted_files)} files for {target} on {date}')
 	return sorted_files 
 
 def plot_image(data,use_wcs=False,cmap_name='viridis'):
@@ -664,6 +664,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 	source_x_fwhm_arcsec = np.zeros((len(sources),len(file_list)),dtype='float32')
 	source_y_fwhm_arcsec = np.zeros((len(sources),len(file_list)),dtype='float32')
 	source_theta_radians = np.zeros((len(sources),len(file_list)),dtype='float32')
+	scintillation_adu = np.zeros((len(sources),len(file_list)),dtype='float32') 
 
 	#ARRAYS THAT CONTAIN DATA PERTAININING TO EACH APERTURE RADIUS FOR EACH SOURCE FOR EACH FILE
 	source_minus_sky_ADU = np.zeros((len(ap_radii),len(sources),len(file_list)),dtype='float32')
@@ -774,7 +775,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 		lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary
 		
 		#Calculate expected scintillation noise in this image
-		scintillation_rel = 0.09*(130)**(-2/3)*airmasses[i]**(7/4)*(2*EXPTIME)**(-1/2)*np.exp(-2306/8000)
+		scintillation_rel = 1.5*np.sqrt(1+1/(len(sources)-1))*0.09*(130)**(-2/3)*airmasses[i]**(7/4)*(2*EXPTIME)**(-1/2)*np.exp(-2306/8000)
 
 		#UPDATE SOURCE POSITIONS
 		#METHOD 1: WCS
@@ -917,10 +918,18 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 
 			#Calculation scintillation 
 			scintillation_abs_e = scintillation_rel * source_minus_sky_ADU[k,:,i]*GAIN
-			
+			scintillation_adu[:,i] = scintillation_abs_e / GAIN
+
 			# Calculate uncertainty
 			source_minus_sky_err_e = np.sqrt(source_minus_sky_ADU[k,:,i]*GAIN+ source_sky_ADU[:,i]*ap_area*GAIN + DARK_CURRENT*EXPTIME*ap_area + ap_area*READ_NOISE**2 + scintillation_abs_e**2)
 			source_minus_sky_err_ADU[k,:,i] = source_minus_sky_err_e / GAIN
+			if ap_radii[k] == 15:
+				v_star = source_minus_sky_ADU[k,1,i]*GAIN
+				v_sky = source_sky_ADU[1,i]*GAIN 
+				v_dark = DARK_CURRENT*EXPTIME
+				v_read = READ_NOISE**2
+				breakpoint()
+
 		logger.debug(f'Aperture photometry time: {time.time()-tphot:.2f} s')
 
 		tfwhm = time.time()
@@ -2450,7 +2459,7 @@ def main(raw_args=None):
 	#exclude_files(date, target, ffname)
 
 	#Get paths to the reduced data for this night/target/ffname
-	flattened_files = get_flattened_files(date, target, ffname, logger)
+	flattened_files = get_flattened_files(date, target, ffname)
 
 	# identify sources in the field 
 	sources = source_selection(flattened_files, logger, edge_limit=edge_limit)
