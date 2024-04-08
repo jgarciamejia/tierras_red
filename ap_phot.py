@@ -389,9 +389,12 @@ def reference_star_chooser(file_list, target_position=(0,0), plot=True, overwrit
 	# write out the source csv files
 	all_sources_df = all_field_sources.to_pandas()
 	all_sources_df.to_csv(reference_file_path.parent/(f'{field}_all_source_detections.csv'), index=0)
+	set_tierras_permissions(reference_file_path.parent/(f'{field}_all_source_detections.csv'))
 
 	output_df = output_table.to_pandas()
 	output_df.to_csv(reference_file_path.parent/(f'{field}_target_and_ref_stars.csv'), index=0)
+	set_tierras_permissions(reference_file_path.parent/(f'{field}_target_and_ref_stars.csv'))
+
 	return output_df 
 
 def load_bad_pixel_mask():
