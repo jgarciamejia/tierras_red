@@ -670,6 +670,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 	fh = logging.FileHandler(log_path, mode='w')
 	fh.setFormatter(formatter)
 	logger.addHandler(fh)
+	set_tierras_permissions(log_path)
 
 	# log input params
 	logger.info(f'Target: {target}')
