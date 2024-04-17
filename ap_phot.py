@@ -648,7 +648,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 	date = file_list[0].parent.parent.parent.name 
 	
 	# set up logger
-	log_path = Path('/data/tierras/lightcurves/'+date+'/'+target+'/'+ffname+f'/circular_{type}_ap_phot.log')
+	log_path = Path('/data/tierras/lightcurves/'+date+'/'+target+'/'+ffname+f'/circular_{type}_ap_phot_2.log')
 
 	# create logger
 	logger = logging.getLogger(__name__)
@@ -685,7 +685,8 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 	logger.info(f'Centroid: {centroid}')
 	if centroid:
 		logger.info(f'Centroid function: {centroid_type}')
-	# file_list = file_list[167:] #TESTING!!!
+	
+	file_list = file_list[129:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
@@ -1131,7 +1132,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 			# ax[1].imshow(g(xx2,yy2),origin='lower',interpolation='none',norm=norm)
 			# plt.tight_layout()
 			# breakpoint()
-	
+			
 		logger.debug(f'Major FWHM (arcsec): {[f"{item:.2f}" for item in source_x_fwhm_arcsec[:,i]]}')
 		logger.debug(f'Minor FWHM (arcsec): {[f"{item:.2f}" for item in source_y_fwhm_arcsec[:,i]]}')
 		logger.debug(f'Theta (rad): {[f"{item:.2f}" for item in source_theta_radians[:,i]]}')
@@ -2436,7 +2437,7 @@ def lc_post_processing(date, target, ffname,overwrite=False):
 
 			#NEW: Use Tierras weighting to create the ALC and generate relative target flux
 			weights, alc, alc_err = tierras_ref_weighting(df)
-
+			
 			#Read in raw fluxes 
 			for j in range(n_refs+1):
 				if j == 0:
@@ -2448,22 +2449,27 @@ def lc_post_processing(date, target, ffname,overwrite=False):
 			
 			#Creat post-processed light curves using weights and performing regression
 			for j in range(n_refs+1):
+
+				# create a dictionary that can be used in the regression 
 				ancillary_dict = {'X':x,'Y':y,'FWHM X':fwhm_x,'FWHM Y':fwhm_y,'Airmass':airmass}
 				ancillary_dict_sc = copy.deepcopy(ancillary_dict)
+
+				#
 				use_ref_inds = np.arange(0,n_refs)
 				if j == 0:
 					targ = 'Target'
 				else:
 					targ = f'Ref {j}'
 					use_ref_inds = np.delete(use_ref_inds, j-1)
+				
 				weights_loop = weights[use_ref_inds]
 				weights_loop /= np.sum(weights_loop) #Renormalize
 
 				#Generate this target's ALC using the weights
 				raw_flux = raw_fluxes[:,j]
 				raw_flux_err = raw_flux_errors[:,j]
-				alc = np.nansum(weights_loop*raw_fluxes[:,use_ref_inds],axis=1)
-				alc_err = np.sqrt(np.nansum((weights_loop*raw_flux_errors[:,use_ref_inds])**2,axis=1))
+				alc = np.nansum(weights_loop*raw_fluxes[:,use_ref_inds+1],axis=1)
+				alc_err = np.sqrt(np.nansum((weights_loop*raw_flux_errors[:,use_ref_inds+1])**2,axis=1))
 				
 				#Correct with the ALC
 				rel_flux = raw_flux/alc
@@ -2488,7 +2494,7 @@ def lc_post_processing(date, target, ffname,overwrite=False):
 
 				#NEW: DO REGRESSION
 				reg_flux, intercept, coeffs, regress_dict = regression(rel_flux_sc,ancillary_dict_sc,verbose=False)
-				
+
 				#Construct the model on the FULL flux (not sigmaclipped/NaN'd)
 				if intercept == 0:
 					#If no regression was performed (no variables were significantly correlated with the input flux) the regression model should be treated as an array of ones
@@ -2572,8 +2578,8 @@ def lc_post_processing(date, target, ffname,overwrite=False):
 					#Option 1: Evaluate the median standard deviation over 5-minute intervals 
 					bin_inds = tierras_binner_inds(times, bin_mins=5)
 					stddevs = np.zeros(len(bin_inds))
-					for j in range(len(bin_inds)):
-						stddevs[j] = np.nanstd(rel_targ_flux[bin_inds[j]])
+					for jj in range(len(bin_inds)):
+						stddevs[jj] = np.nanstd(rel_targ_flux[bin_inds[jj]])
 					med_stddev = np.nanmedian(stddevs)
 
 						
@@ -2584,6 +2590,7 @@ def lc_post_processing(date, target, ffname,overwrite=False):
 						best_lc_path = lc_list[i]
 						best_stddev = med_stddev
 						weights_save = weights
+					
 
 			#Write out the updated dataframe
 			df.to_csv(lc_list[i],index=0)
