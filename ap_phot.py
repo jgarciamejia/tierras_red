@@ -148,7 +148,7 @@ def plot_image(data,use_wcs=False,cmap_name='viridis'):
 	plt.tight_layout()
 	return fig, ax
 
-def source_selection(file_list, logger, min_snr=3, edge_limit=20, plot=False, plate_scale=0.432):	
+def source_selection(file_list, logger, min_snr=6, edge_limit=20, plot=False, plate_scale=0.432):	
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
 		INPUTS: 
@@ -343,6 +343,7 @@ def source_selection(file_list, logger, min_snr=3, edge_limit=20, plot=False, pl
 	source_path = f'/data/tierras/photometry/{date}/{target}/{ffname}/{date}_{target}_sources.csv'
 	output_df = output_table.to_pandas()
 	output_df.to_csv(source_path, index=0)
+	set_tierras_permissions(source_path)
 
 	logger.debug(f'Saved source csv to {source_path}')
 	return output_df
@@ -664,7 +665,6 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 	source_x_fwhm_arcsec = np.zeros((len(sources),len(file_list)),dtype='float32')
 	source_y_fwhm_arcsec = np.zeros((len(sources),len(file_list)),dtype='float32')
 	source_theta_radians = np.zeros((len(sources),len(file_list)),dtype='float32')
-	scintillation_adu = np.zeros((len(sources),len(file_list)),dtype='float32') 
 
 	#ARRAYS THAT CONTAIN DATA PERTAININING TO EACH APERTURE RADIUS FOR EACH SOURCE FOR EACH FILE
 	source_minus_sky_ADU = np.zeros((len(ap_radii),len(sources),len(file_list)),dtype='float32')
@@ -696,6 +696,12 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 	centroid_footprint = circular_footprint(5)
 
 	logger.info(f'Doing fixed-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.')
+
+	#TODO: this is only approximate since we measure background on sigma-clipped distribution
+	# also don't know what nb should be in the case of a 2d bkg model
+	if bkg_type == '1d':
+		nb = np.pi*an_out**2 - np.pi*an_in**2
+
 	t1 = time.time()
 	for i in range(n_files):
 		if i > 0:
@@ -772,10 +778,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 			wind_gusts[i] = np.nan
 			wind_dirs[i] = np.nan
 
-		lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary
-		
-		#Calculate expected scintillation noise in this image
-		scintillation_rel = 1.5*np.sqrt(1+1/(len(sources)-1))*0.09*(130)**(-2/3)*airmasses[i]**(7/4)*(2*EXPTIME)**(-1/2)*np.exp(-2306/8000)
+		lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary	
 
 		#UPDATE SOURCE POSITIONS
 		#METHOD 1: WCS
@@ -916,19 +919,15 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 				# ax1[1].cla()
 				# ax1[2].cla()
 
-			#Calculation scintillation 
-			scintillation_abs_e = scintillation_rel * source_minus_sky_ADU[k,:,i]*GAIN
-			scintillation_adu[:,i] = scintillation_abs_e / GAIN
+			# calculate photometric uncertainty IN ADU following Stefansson et al. (2017) formalism
+			v_star = source_minus_sky_ADU[k,:,i]*GAIN 
+			v_sky = source_sky_ADU[:,i]*GAIN 
+			v_dark = DARK_CURRENT*EXPTIME 
+			v_read = READ_NOISE**2 
+			sigma_ccd = np.sqrt(v_star + ap_area*(1+ap_area/nb)*(v_sky + v_dark + v_read))/GAIN 
 
 			# Calculate uncertainty
-			source_minus_sky_err_e = np.sqrt(source_minus_sky_ADU[k,:,i]*GAIN+ source_sky_ADU[:,i]*ap_area*GAIN + DARK_CURRENT*EXPTIME*ap_area + ap_area*READ_NOISE**2 + scintillation_abs_e**2)
-			source_minus_sky_err_ADU[k,:,i] = source_minus_sky_err_e / GAIN
-			if ap_radii[k] == 15:
-				v_star = source_minus_sky_ADU[k,1,i]*GAIN
-				v_sky = source_sky_ADU[1,i]*GAIN 
-				v_dark = DARK_CURRENT*EXPTIME
-				v_read = READ_NOISE**2
-				breakpoint()
+			source_minus_sky_err_ADU[k,:,i] = sigma_ccd
 
 		logger.debug(f'Aperture photometry time: {time.time()-tphot:.2f} s')
 
@@ -2451,6 +2450,7 @@ def main(raw_args=None):
 	fh = logging.FileHandler(log_path, mode='w')
 	fh.setFormatter(formatter)
 	logger.addHandler(fh)
+	set_tierras_permissions(log_path)
 
 	logger.info(f'Running field {target} on {date}')
 
@@ -2469,7 +2469,6 @@ def main(raw_args=None):
 
 	# identify sources in the field 
 	sources = source_selection(flattened_files, logger, edge_limit=edge_limit)
-
 
 	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, bkg_type=bkg_type)
 
