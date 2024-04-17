@@ -686,7 +686,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 	if centroid:
 		logger.info(f'Centroid function: {centroid_type}')
 	
-	file_list = file_list[129:] #TESTING!!!
+	# file_list = file_list[129:] #TESTING!!!
 	
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
