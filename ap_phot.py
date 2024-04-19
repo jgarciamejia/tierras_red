@@ -556,6 +556,7 @@ def generate_square_cutout(image, position, size):
 
 	return cutout, position_in_cutout
 
+<<<<<<< HEAD
 
 
 def points_along_line(pos, array, t_values, theta):
@@ -569,6 +570,9 @@ def points_along_line(pos, array, t_values, theta):
 	return x_coords, y_coords
 
 def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40., an_out=60., type='fixed', centroid=False, centroid_type='centroid_2dg', bkg_type='1d'):
+=======
+def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., an_out=60., type='fixed', centroid=False, centroid_type='centroid_2dg', bkg_type='1d', live_plot=False, interpolate_cosmics=False):
+>>>>>>> main
 	"""
 	Does circular aperture photometry on sources in a list of reduced Tierras images for an array of aperture sizes. Writes out photometry csv files to /data/tierras/lightcurves/date/target/ffname/.
 
@@ -613,6 +617,25 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 	
 	# file_list = file_list[50:] #TESTING!!!	
 
+<<<<<<< HEAD
+=======
+	# log input params
+	logger.info(f'Target: {target}')
+	logger.info(f'Date: {date}')
+	logger.info(f'ffname: {ffname}')
+	logger.info(f'Photometry type: {type}')
+	logger.info(f'Ap radii: {ap_radii}')
+	logger.info(f'Bkg type: {bkg_type}')
+	if bkg_type == '1d':
+		logger.info(f'An in: {an_in}')
+		logger.info(f'An out: {an_out}')
+	logger.info(f'Centroid: {centroid}')
+	if centroid:
+		logger.info(f'Centroid function: {centroid_type}')
+	
+	# file_list = file_list[129:] #TESTING!!!
+	
+>>>>>>> main
 	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
 	NONLINEAR_THRESHOLD = 40000. #ADU
 	SATURATION_THRESHOLD = 55000. #ADU
@@ -688,6 +711,16 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 	bpm[0:25+1,:] = True
 	bpm[2048-1-25:,:] = True
 
+<<<<<<< HEAD
+=======
+	if interpolate_cosmics:
+		from astroscrappy import detect_cosmics 
+		bp_inds = np.where(bpm == 1)
+
+	reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
+
+	#reference_image_hdu = fits.open(file_list[1])[0]
+>>>>>>> main
 
 	n_files = len(file_list)
 
@@ -719,7 +752,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 		EXPTIME = source_header['EXPTIME']
 		RA = source_header['RA']
 		DEC = source_header['DEC']
-		
+
 		#SAVE ANCILLARY DATA
 		filenames.append(file_list[i].name)
 		mjd_utc[i] = source_header['MJD-OBS'] + (EXPTIME/2)/(24*60*60) #MJD-OBS is the modified julian date at the start of the exposure. Add on half the exposure time in days to get the time at mid-exposure. 
@@ -844,12 +877,14 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 		# elif type == 'variable':
 		# 	apertures = [CircularAperture(source_positions,r=ap_radii[k]*smoothed_fwhm_pix[i])]	
 		
+
 		# check for non-linear/saturated pixels in the apertures 
 		# just do in the smallest aperture for now  
 		aperture_masks = apertures[0].to_mask(method='center')
 		for j in range(len(apertures[0])):
-			ap_cutout = aperture_masks[j].multiply(source_data)
-			ap_pix_vals = ap_cutout[ap_cutout!=0]
+			# ap_cutout = aperture_masks[j].multiply(source_data)
+			# ap_pix_vals = ap_cutout[ap_cutout!=0]
+			ap_pix_vals = aperture_masks[j].get_values(source_data)
 			non_linear_flags[:,j,i] = int(np.sum(ap_pix_vals>NONLINEAR_THRESHOLD)>0)
 			saturated_flags[:,j,i] = int(np.sum(ap_pix_vals>SATURATION_THRESHOLD)>0)
 
@@ -926,6 +961,13 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40.
 			v_read = READ_NOISE**2 
 			sigma_ccd = np.sqrt(v_star + ap_area*(1+ap_area/nb)*(v_sky + v_dark + v_read))/GAIN 
 
+<<<<<<< HEAD
+=======
+			#TODO: update noise calculation to match SAME
+			#Calculation scintillation 
+			scintillation_abs_e = scintillation_rel * source_minus_sky_ADU[k,:,i]*GAIN
+			
+>>>>>>> main
 			# Calculate uncertainty
 			source_minus_sky_err_ADU[k,:,i] = sigma_ccd
 
