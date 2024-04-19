@@ -148,7 +148,7 @@ def plot_image(data,use_wcs=False,cmap_name='viridis'):
 	plt.tight_layout()
 	return fig, ax
 
-def source_selection(file_list, logger, min_snr=6, edge_limit=20, plot=False, plate_scale=0.432):	
+def source_selection(file_list, logger, min_snr=6, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False):	
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
 		INPUTS: 
@@ -172,8 +172,17 @@ def source_selection(file_list, logger, min_snr=6, edge_limit=20, plot=False, pl
 			output_df (pandas DataFrame): a data frame containing the target and reference stars, with the target as the first entry
 
 	'''
+	
+	# write out the source csv file
+	date = file_list[0].parent.parent.parent.name 
+	target = file_list[0].parent.parent.name 
+	ffname = file_list[0].parent.name 
+	source_path = f'/data/tierras/photometry/{date}/{target}/{ffname}/{date}_{target}_sources.csv'
 
-	field = file_list[0].parent.parent.name
+	if os.path.exists(source_path) and not overwrite:
+		logger.info(f'Restoring existing sources from {source_path}.')
+		source_df = pd.read_csv(source_path)
+		return source_df
 
 	# use the wcs to evaluate the coordinates of the central pixel in images over the night to determine average pointing
 	central_ras = []
@@ -335,12 +344,6 @@ def source_selection(file_list, logger, min_snr=6, edge_limit=20, plot=False, pl
 	# create the output dataframe consisting of the target as the 0th entry and the reference stars
 	output_table = copy.deepcopy(res)
 
-	# write out the source csv file
-	date = file_list[0].parent.parent.parent.name 
-	target = file_list[0].parent.parent.name 
-	ffname = file_list[0].parent.name 
-
-	source_path = f'/data/tierras/photometry/{date}/{target}/{ffname}/{date}_{target}_sources.csv'
 	output_df = output_table.to_pandas()
 	output_df.to_csv(source_path, index=0)
 	set_tierras_permissions(source_path)
@@ -556,23 +559,7 @@ def generate_square_cutout(image, position, size):
 
 	return cutout, position_in_cutout
 
-<<<<<<< HEAD
-
-
-def points_along_line(pos, array, t_values, theta):
-	# Calculate x and y coordinates along the line
-	x_coords = np.round(pos[0] + t_values * np.cos(theta)).astype(int)
-	y_coords = np.round(pos[1] + t_values * np.sin(theta)).astype(int)
-
-	# Clip coordinates to image boundaries
-	x_coords = np.clip(x_coords, 0, array.shape[1] - 1)
-	y_coords = np.clip(y_coords, 0, array.shape[0] - 1)
-	return x_coords, y_coords
-
-def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=40., an_out=60., type='fixed', centroid=False, centroid_type='centroid_2dg', bkg_type='1d'):
-=======
-def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., an_out=60., type='fixed', centroid=False, centroid_type='centroid_2dg', bkg_type='1d', live_plot=False, interpolate_cosmics=False):
->>>>>>> main
+def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35, an_out=55, type='fixed', centroid=False, centroid_type='centroid_2dg', interpolate_cosmics=False):
 	"""
 	Does circular aperture photometry on sources in a list of reduced Tierras images for an array of aperture sizes. Writes out photometry csv files to /data/tierras/lightcurves/date/target/ffname/.
 
@@ -586,8 +573,6 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 	type (str): The type of aperture photometry to perform, 'fixed' or 'variable'. If 'fixed', ap_radii is interpreted as a list of circular aperture radii (in pixels). If 'variable', ap_radii is interpreted as a list of multiplicative factors times the FWHM seeing in the images (i.e., the aperture radii will vary in time in accordance with seeing changes). 
 	centroid (bool): Whether or not to perform centroiding on expected source positions. 
 	centroid_type (str): The photutils centroiding function to use for centroiding if centroid == True. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'. 
-	bkg_type (str): The method to use for measuring the sky background around each source. If '1d', it will use the sigma-clipped mean of pixels falling within the annulus specified by an_in and an_out (using a 2-sigma clipping threshold). If '2d', it will perform a 2D model of the background, and measure the background in the source annulus by performing aperture photometry on the 2D model. 
-	live_plot (bool): Whether or not to plot photometry as you go along. 
 	
 	Returns:
 	None
@@ -606,37 +591,31 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 			centroid_func = centroid_quadratic
 		else:
 			raise RuntimeError("centroid_type must be one of 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.")
-
-	bkg_type = bkg_type.lower()
-	if (bkg_type != '1d') and (bkg_type != '2d'):
-		raise RuntimeError("bkg_type must be '1d' or '2d'.")
-
+	
 	ffname = file_list[0].parent.name	
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
 	
 	# file_list = file_list[50:] #TESTING!!!	
+	n_files = len(file_list)
+	n_sources = len(sources)
+	n_aps = len(ap_radii)
 
-<<<<<<< HEAD
-=======
 	# log input params
 	logger.info(f'Target: {target}')
 	logger.info(f'Date: {date}')
 	logger.info(f'ffname: {ffname}')
 	logger.info(f'Photometry type: {type}')
 	logger.info(f'Ap radii: {ap_radii}')
-	logger.info(f'Bkg type: {bkg_type}')
-	if bkg_type == '1d':
-		logger.info(f'An in: {an_in}')
-		logger.info(f'An out: {an_out}')
+	logger.info(f'An in: {an_in}')
+	logger.info(f'An out: {an_out}')
 	logger.info(f'Centroid: {centroid}')
 	if centroid:
 		logger.info(f'Centroid function: {centroid_type}')
 	
 	# file_list = file_list[129:] #TESTING!!!
 	
->>>>>>> main
-	DARK_CURRENT = 0.19 #e- pix^-1 s^-1
+	DARK_CURRENT = 0.00133 #e- pix^-1 s^-1, see Juliana's dissertation Table 4.1
 	NONLINEAR_THRESHOLD = 40000. #ADU
 	SATURATION_THRESHOLD = 55000. #ADU
 	PLATE_SCALE = 0.432 #arcsec pix^-1, from Juliana's dissertation Table 1.1
@@ -647,57 +626,56 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH FILE
 	filenames = []
-	wcs_flags = np.zeros(len(file_list), dtype='int')
-	centroid_flags = np.zeros(len(file_list), dtype='int')
-	mjd_utc = np.zeros(len(file_list),dtype='float')
-	jd_utc = np.zeros(len(file_list),dtype='float')
-	bjd_tdb = np.zeros(len(file_list),dtype='float')
-	airmasses = np.zeros(len(file_list),dtype='float16')
-	ccd_temps = np.zeros(len(file_list),dtype='float16')
-	exp_times = np.zeros(len(file_list),dtype='float16')
-	dome_temps = np.zeros(len(file_list),dtype='float16')
-	focuses = np.zeros(len(file_list),dtype='float16')
-	dome_humidities = np.zeros(len(file_list),dtype='float16')
-	sec_temps = np.zeros(len(file_list),dtype='float16')
-	ret_temps = np.zeros(len(file_list),dtype='float16')
-	pri_temps = np.zeros(len(file_list),dtype='float16')
-	rod_temps = np.zeros(len(file_list),dtype='float16')
-	cab_temps = np.zeros(len(file_list),dtype='float16')
-	inst_temps = np.zeros(len(file_list),dtype='float16')
-	temps = np.zeros(len(file_list),dtype='float16')
-	humidities = np.zeros(len(file_list),dtype='float16')
-	dewpoints = np.zeros(len(file_list),dtype='float16')
-	sky_temps = np.zeros(len(file_list),dtype='float16')
-	pressures = np.zeros(len(file_list),dtype='float16')
-	return_pressures = np.zeros(len(file_list),dtype='float16')
-	supply_pressures = np.zeros(len(file_list),dtype='float16')
-	hour_angles = np.zeros(len(file_list),dtype='float16')
-	dome_azimuths = np.zeros(len(file_list),dtype='float16')
-	wind_speeds = np.zeros(len(file_list),dtype='float16')
-	wind_gusts = np.zeros(len(file_list),dtype='float16')
-	wind_dirs = np.zeros(len(file_list),dtype='float16')
+	wcs_flags = np.zeros(n_files, dtype='int')
+	centroid_flags = np.zeros(n_files, dtype='int')
+	mjd_utc = np.zeros(n_files, dtype='float')
+	jd_utc = np.zeros(n_files,dtype='float')
+	bjd_tdb = np.zeros(n_files,dtype='float')
+	airmasses = np.zeros(n_files,dtype='float16')
+	ccd_temps = np.zeros(n_files,dtype='float16')
+	exp_times = np.zeros(n_files,dtype='float16')
+	dome_temps = np.zeros(n_files,dtype='float16')
+	focuses = np.zeros(n_files,dtype='float16')
+	dome_humidities = np.zeros(n_files,dtype='float16')
+	sec_temps = np.zeros(n_files,dtype='float16')
+	ret_temps = np.zeros(n_files,dtype='float16')
+	pri_temps = np.zeros(n_files,dtype='float16')
+	rod_temps = np.zeros(n_files,dtype='float16')
+	cab_temps = np.zeros(n_files,dtype='float16')
+	inst_temps = np.zeros(n_files,dtype='float16')
+	temps = np.zeros(n_files,dtype='float16')
+	humidities = np.zeros(n_files,dtype='float16')
+	dewpoints = np.zeros(n_files,dtype='float16')
+	sky_temps = np.zeros(n_files,dtype='float16')
+	pressures = np.zeros(n_files,dtype='float16')
+	return_pressures = np.zeros(n_files,dtype='float16')
+	supply_pressures = np.zeros(n_files,dtype='float16')
+	hour_angles = np.zeros(n_files,dtype='float16')
+	dome_azimuths = np.zeros(n_files,dtype='float16')
+	wind_speeds = np.zeros(n_files,dtype='float16')
+	wind_gusts = np.zeros(n_files,dtype='float16')
+	wind_dirs = np.zeros(n_files,dtype='float16')
 
-	loop_times = np.zeros(len(file_list),dtype='float16')
-	lunar_distance = np.zeros(len(file_list),dtype='float16')
+	loop_times = np.zeros(n_files,dtype='float16')
+	lunar_distance = np.zeros(n_files,dtype='float16')
 	
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH SOURCE IN EACH FILE
-	source_x = np.zeros((len(sources),len(file_list)),dtype='float32')
-	source_y = np.zeros((len(sources),len(file_list)),dtype='float32')
-	source_sky_ADU = np.zeros((len(sources),len(file_list)),dtype='float32')
-	# source_sky_e = np.zeros((len(targ_and_refs),len(file_list)),dtype='float32')
-	source_x_fwhm_arcsec = np.zeros((len(sources),len(file_list)),dtype='float32')
-	source_y_fwhm_arcsec = np.zeros((len(sources),len(file_list)),dtype='float32')
-	source_theta_radians = np.zeros((len(sources),len(file_list)),dtype='float32')
+	source_x = np.zeros((n_sources,n_files),dtype='float32')
+	source_y = np.zeros((n_sources,n_files),dtype='float32')
+	source_sky_ADU = np.zeros((n_sources,n_files),dtype='float32')
+	source_x_fwhm_arcsec = np.zeros((n_sources,n_files),dtype='float32')
+	source_y_fwhm_arcsec = np.zeros((n_sources,n_files),dtype='float32')
+	source_theta_radians = np.zeros((n_sources,n_files),dtype='float32')
 
 	#ARRAYS THAT CONTAIN DATA PERTAININING TO EACH APERTURE RADIUS FOR EACH SOURCE FOR EACH FILE
-	source_minus_sky_ADU = np.zeros((len(ap_radii),len(sources),len(file_list)),dtype='float32')
-	source_minus_sky_err_ADU = np.zeros((len(ap_radii),len(sources),len(file_list)),dtype='float32')
-	non_linear_flags = np.zeros((len(ap_radii),len(sources),len(file_list)),dtype='bool')
-	saturated_flags = np.zeros((len(ap_radii),len(sources),len(file_list)),dtype='bool')	
-
-	source_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float16')
-	an_in_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float16')
-	an_out_radii = np.zeros((len(ap_radii),len(file_list)),dtype='float16')
+	source_minus_sky_ADU = np.zeros((n_aps,n_sources,n_files),dtype='float32')
+	source_minus_sky_err_ADU = np.zeros((n_aps,n_sources,n_files),dtype='float32')
+	non_linear_flags = np.zeros((n_aps,n_sources,n_files),dtype='bool')
+	saturated_flags = np.zeros((n_aps,n_sources,n_files),dtype='bool')	
+	interpolation_flags = np.zeros((n_aps,n_sources,n_files),dtype='bool')
+	source_radii = np.zeros((n_aps,n_files),dtype='float16')
+	an_in_radii = np.zeros((n_aps,n_files),dtype='float16')
+	an_out_radii = np.zeros((n_aps,n_files),dtype='float16')
 	
 	#Load in the stacked image of the field that was used for source identification. 
 	#All images will be cross-correlated with this to determine aperture positions. 
@@ -711,18 +689,14 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 	bpm[0:25+1,:] = True
 	bpm[2048-1-25:,:] = True
 
-<<<<<<< HEAD
-=======
 	if interpolate_cosmics:
 		from astroscrappy import detect_cosmics 
 		bp_inds = np.where(bpm == 1)
+		
 
 	reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
 
 	#reference_image_hdu = fits.open(file_list[1])[0]
->>>>>>> main
-
-	n_files = len(file_list)
 
 	# declare a circular footprint in case centroiding is performed
 	# only data within a radius of x pixels around the expected source positions from WCS will be considered for centroiding
@@ -731,9 +705,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 	logger.info(f'Doing fixed-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.')
 
 	#TODO: this is only approximate since we measure background on sigma-clipped distribution
-	# also don't know what nb should be in the case of a 2d bkg model
-	if bkg_type == '1d':
-		nb = np.pi*an_out**2 - np.pi*an_in**2
+	nb = np.pi*an_out**2 - np.pi*an_in**2
 
 	t1 = time.time()
 	for i in range(n_files):
@@ -813,6 +785,11 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 
 		lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary	
 
+		if interpolate_cosmics:
+			data_copy = copy.deepcopy(source_data)
+			cosmic_mask, cosmic_interpolated_data = detect_cosmics(data_copy, gain=GAIN, sigclip=7, sigfrac=0.1, objlim=1)
+
+
 		#UPDATE SOURCE POSITIONS
 		#METHOD 1: WCS
 		tcent = time.time()
@@ -824,7 +801,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 			logger.info(f'WARNING: header indicates astrometric solution with RMS of {source_header["STDCRMS"]}, WCS positions may not be accurate.')
 			wcs_flags[i] = 1
 
-		transformed_pixel_coordinates = np.array([source_wcs.world_to_pixel((SkyCoord(sources['ra_tierras'][i]*u.deg, sources['dec_tierras'][i]*u.deg))) for i in range(len(sources))])
+		transformed_pixel_coordinates = np.array([source_wcs.world_to_pixel((SkyCoord(sources['ra_tierras'][i]*u.deg, sources['dec_tierras'][i]*u.deg))) for i in range(n_sources)])
 		
 		#Save transformed pixel coordinates of sources
 		source_x[:,i] = transformed_pixel_coordinates[:,0]
@@ -835,7 +812,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 		# 	ax2.plot(source_x[j,i],source_y[j,i],'rx')
 		# breakpoint()
 
-		source_positions = [(source_x[j,i], source_y[j,i]) for j in range(len(sources))]
+		source_positions = [(source_x[j,i], source_y[j,i]) for j in range(n_sources)]
 
 		if (sum(source_x[:,i] < 0) + sum(source_y[:,i] < 0) + sum(source_x[:,i] > source_data.shape[1]) + sum(source_y[:,i] > source_data.shape[0])) > 0:
 			warnings.warn('Sources off chip! Skipping photometry.')
@@ -863,7 +840,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 			# logger.debug(f'Source x (centroid): {[f"{item:.2f}" for item in source_x[:,i]]}')
 			# logger.debug(f'Source y (centroid): {[f"{item:.2f}" for item in source_y[:,i]]}')
 			
-			source_positions = [(source_x[j,i], source_y[j,i]) for j in range(len(sources))]
+			source_positions = [(source_x[j,i], source_y[j,i]) for j in range(n_sources)]
 	
 		logger.debug(f'Source position loop time: {time.time()-tcent:.2f} s')
 
@@ -876,49 +853,13 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 		# TODO: need to implement variable apertures!
 		# elif type == 'variable':
 		# 	apertures = [CircularAperture(source_positions,r=ap_radii[k]*smoothed_fwhm_pix[i])]	
-		
-
-		# check for non-linear/saturated pixels in the apertures 
-		# just do in the smallest aperture for now  
-		aperture_masks = apertures[0].to_mask(method='center')
-		for j in range(len(apertures[0])):
-			# ap_cutout = aperture_masks[j].multiply(source_data)
-			# ap_pix_vals = ap_cutout[ap_cutout!=0]
-			ap_pix_vals = aperture_masks[j].get_values(source_data)
-			non_linear_flags[:,j,i] = int(np.sum(ap_pix_vals>NONLINEAR_THRESHOLD)>0)
-			saturated_flags[:,j,i] = int(np.sum(ap_pix_vals>SATURATION_THRESHOLD)>0)
 
 		tbkg = time.time()	
 		# measure background
-		if bkg_type == '1d':
-			# this option does bkg measurement using sigma-clipped mean of pixels falling in the annulus around each source
-			annuli = CircularAnnulus(source_positions, an_in, an_out)
-			annulus_masks = annuli.to_mask(method='center')
-			for j in range(len(annuli)):
-				source_sky_ADU[j,i] = np.mean(sigmaclip(annulus_masks[j].get_values(source_data),2,2)[0])
-		elif bkg_type == '2d':
-			# this option does a 2D model of the background and measures the total background in each aperture by performing aperture photometry
-			sigma_clip = SigmaClip(sigma=3.0)
-			bkg_estimator = MedianBackground()
-			bkg = Background2D(source_data, (32, 32), filter_size=(3, 3), sigma_clip=sigma_clip, bkg_estimator=bkg_estimator, mask=mask)
-			phot_table_2 = aperture_photometry(bkg.background, apertures)
-			
-			# fig1, ax1 = plt.subplots(1,3,figsize=(19,5),sharex=True,sharey=True)
-			# norm1 = simple_norm(source_data, min_percent=1, max_percent=99)
-			# ax1[0].imshow(source_data, origin='lower', norm=norm1)
-			# ax1[0].plot(centroid_x, centroid_y, 'rx')
-
-			# norm2 = simple_norm(bkg.background, min_percent=1, max_percent=99)
-			# ax1[1].imshow(bkg.background, origin='lower', norm=norm2)
-
-			# norm3 = simple_norm(source_data-bkg.background, min_percent=1, max_percent=99)
-			# ax1[2].imshow(source_data-bkg.background, origin='lower', norm=norm3)
-			# plt.tight_layout()
-			# breakpoint()
-			# plt.close()
-			
-			# Save the estimated per-pixel background by dividing the background in the largest aperture by the area of the largest aperture
-			source_sky_ADU[:,i] = phot_table_2[f'aperture_sum_{len(ap_radii)-1}']/(np.pi*ap_radii[-1]**2)
+		annuli = CircularAnnulus(source_positions, an_in, an_out)
+		annulus_masks = annuli.to_mask(method='center')
+		for j in range(len(annuli)):
+			source_sky_ADU[j,i] = np.mean(sigmaclip(annulus_masks[j].get_values(source_data),2,2)[0])
 		logger.debug(f'Bkg loop time: {time.time()-tbkg:.2f} s')
 
 		tphot = time.time()
@@ -926,33 +867,12 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 		phot_table = aperture_photometry(source_data, apertures)
 
 		# Calculate sky-subtracted flux
-		for k in range(len(ap_radii)):
+		for k in range(n_aps):
 			source_radii[k, i] = ap_radii[k]
 			ap_area = apertures[k].area
 			
 			# for 1d background, subtract off the average bkg value measured in the annulus times the aperture area
-			if bkg_type == '1d':
-				source_minus_sky_ADU[k,:,i] = phot_table[f'aperture_sum_{k}']-source_sky_ADU[:,i]*ap_area
-
-			# for 2d background, subtract off the aperture_sum in the aperture in the 2D background model
-			elif bkg_type == '2d':
-				source_minus_sky_ADU[k,:,i] = phot_table[f'aperture_sum_{k}'] - phot_table_2[f'aperture_sum_{k}']
-				source_sky_ADU
-				
-				# norm1 = simple_norm(source_data, min_percent=1, max_percent=99)
-				# ax1[0].imshow(source_data, origin='lower', norm=norm1)
-				# ax1[0].plot(centroid_x, centroid_y, 'rx')
-
-				# norm2 = simple_norm(bkg.background, min_percent=1, max_percent=99)
-				# ax1[1].imshow(bkg.background, origin='lower', norm=norm2)
-
-				# norm3 = simple_norm(source_data-bkg.background, min_percent=1, max_percent=99)
-				# ax1[2].imshow(source_data-bkg.background, origin='lower', norm=norm3)
-				# plt.tight_layout()
-				# plt.pause(0.1)
-				# ax1[0].cla()
-				# ax1[1].cla()
-				# ax1[2].cla()
+			source_minus_sky_ADU[k,:,i] = phot_table[f'aperture_sum_{k}']-source_sky_ADU[:,i]*ap_area
 
 			# calculate photometric uncertainty IN ADU following Stefansson et al. (2017) formalism
 			v_star = source_minus_sky_ADU[k,:,i]*GAIN 
@@ -961,18 +881,40 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 			v_read = READ_NOISE**2 
 			sigma_ccd = np.sqrt(v_star + ap_area*(1+ap_area/nb)*(v_sky + v_dark + v_read))/GAIN 
 
-<<<<<<< HEAD
-=======
-			#TODO: update noise calculation to match SAME
-			#Calculation scintillation 
-			scintillation_abs_e = scintillation_rel * source_minus_sky_ADU[k,:,i]*GAIN
-			
->>>>>>> main
 			# Calculate uncertainty
 			source_minus_sky_err_ADU[k,:,i] = sigma_ccd
 
 		logger.debug(f'Aperture photometry time: {time.time()-tphot:.2f} s')
-
+	
+		# check for non-linear/saturated pixels in the apertures 
+		# just do in the smallest aperture for now  
+		aperture_masks = apertures[0].to_mask(method='center')
+		for j in range(n_sources):
+			# ap_cutout = aperture_masks[j].multiply(source_data)
+			# ap_pix_vals = ap_cutout[ap_cutout!=0]
+			ap_pix_vals = aperture_masks[j].get_values(source_data)
+			non_linear_flags[:,j,i] = int(np.sum(ap_pix_vals>NONLINEAR_THRESHOLD)>0)
+			saturated_flags[:,j,i] = int(np.sum(ap_pix_vals>SATURATION_THRESHOLD)>0)
+		
+		if interpolate_cosmics:
+			tcosmic = time.time()
+			for k in range(n_aps):
+				aperture_masks = apertures[k].to_mask(method='center')
+				for j in range(n_sources):
+					cosmic_cutout = aperture_masks[j].multiply(cosmic_mask, fill_value=-1)
+					# if cosmics fall inside the aperture, replace the phot_table with a measurement using new_data
+					if len(np.where(cosmic_cutout == 1)[0]) > 0:
+						# fig, ax = plt.subplots(1,3,sharex=True,sharey=True,figsize=(8,4))
+						# ax[0].imshow(aperture_masks[j].multiply(source_data), origin='lower')
+						# ax[1].imshow(cosmic_cutout, origin='lower')
+						# ax[2].imshow(aperture_masks[j].multiply(cosmic_interpolated_data), origin='lower')
+						
+						interpolated_measurement = aperture_photometry(cosmic_interpolated_data, apertures[k][j])['aperture_sum'] 
+						interpolated_measurement -= source_sky_ADU[j,i]*np.pi*ap_radii[k]**2
+						source_minus_sky_ADU[k,j,i] = interpolated_measurement
+						interpolation_flags[k,j,i] = 1
+			logger.debug(f'Cosmic interpolation time: {time.time()-tcosmic:.2f} s')
+								
 		tfwhm = time.time()
 		#Measure FWHM 
 		k = 0
@@ -989,7 +931,6 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 		# this is, in general, the slowest loop of the program. How can we make it faster??
 		for j in range(len(source_positions)):
 			g_2d_cutout, cutout_pos = generate_square_cutout(source_data, source_positions[j], cutout_size)
-
 			cutout_shape = g_2d_cutout.shape
 
 			bkg = np.median(g_2d_cutout)
@@ -1040,7 +981,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 
 			
 	#Write out photometry. 
-	for i in range(len(ap_radii)):
+	for i in range(n_aps):
 		output_path = Path('/data/tierras/photometry/'+date+'/'+target+'/'+ffname+f'/{date}_{target}_circular_{type}_ap_phot_{ap_radii[i]}.csv')
 		
 		output_list = []
@@ -1116,7 +1057,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 		output_list.append([f'{val:d}' for val in wcs_flags])
 		output_header.append('WCS Flag')
 
-		for j in range(len(sources)):
+		for j in range(n_sources):
 			source_name = f'S{j+1}'
 			output_list.append([f'{val:.4f}' for val in source_x[j]])
 			output_header.append(source_name+' X')
@@ -2459,7 +2400,6 @@ def main(raw_args=None):
 	ap.add_argument("-edge_limit",required=False,default=20,help="Minimum separation a source has from the detector edge to be considered as a reference star.",type=float)
 	ap.add_argument("-centroid",required=False,default=False,help="Whether or not to centroid during aperture photometry.",type=str)
 	ap.add_argument("-centroid_type",required=False,default='centroid_2dg',help="Photutils centroid function. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.",type=str)
-	ap.add_argument("-bkg_type", required=False, default='1d', help="Background type. Can be '1d' or '2d'. If '1d', the backgroudn will be measured as the sigma-clipped mean of pixels in a circular annulus surrounding each source, with the annulus defined by the an_in and an_out params. If '2d', it will be measured using a 2D model of the background.")
 	args = ap.parse_args(raw_args)
 
 	#Access observation info
@@ -2474,7 +2414,6 @@ def main(raw_args=None):
 	edge_limit = args.edge_limit
 	centroid = t_or_f(args.centroid)
 	centroid_type = args.centroid_type
-	bkg_type = args.bkg_type
 
 	# set up the directories for storing photometry data 
 	make_data_dirs(date, target, ffname)
@@ -2512,7 +2451,7 @@ def main(raw_args=None):
 	# identify sources in the field 
 	sources = source_selection(flattened_files, logger, edge_limit=edge_limit)
 
-	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, bkg_type=bkg_type)
+	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=True)
 
 	breakpoint()
 
