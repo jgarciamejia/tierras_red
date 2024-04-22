@@ -1080,6 +1080,8 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 			output_header.append(source_name+' Non-Linear Flag')
 			output_list.append([f'{val:d}' for val in saturated_flags[i,j]])
 			output_header.append(source_name+' Saturated Flag')
+			output_list.append([f'{val:d}' for val in interpolation_flags[i,j]])
+			output_header.append(source_name+' Interpolation Flag')
 
 		output_df = pd.DataFrame(np.transpose(output_list),columns=output_header)
 		if not os.path.exists(output_path.parent.parent):
