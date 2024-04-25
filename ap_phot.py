@@ -148,7 +148,7 @@ def plot_image(data,use_wcs=False,cmap_name='viridis'):
 	plt.tight_layout()
 	return fig, ax
 
-def source_selection(file_list, logger, min_snr=6, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False):	
+def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False):	
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
 		INPUTS: 
@@ -226,20 +226,30 @@ def source_selection(file_list, logger, min_snr=6, edge_limit=20, plot=False, pl
 
 	# use the exposure time calculator to get an estimate for the rp magnitude limit that will give the desired minimum SNR 
 	# this assumes that all the images are taken at the same exposure time
-	rp_mags = np.arange(10,22,0.1)
+	rp_mags = np.arange(7,22,0.1)
 	snrs = np.zeros(len(rp_mags))
 	for ii in range(len(rp_mags)):
 		rp_mag, snr, exptime = etc(rp_mag=rp_mags[ii], exptime=header['EXPTIME'])
 		snrs[ii] = snr 
 	mag_limit = rp_mags[np.argmin(abs(snrs-min_snr))]
-	logger.debug(f'Using a Gaia Rp mag limit of {mag_limit:.1f} to get sources with a minimum SNR of {min_snr}')
+	logger.debug(f'Using a Gaia Rp mag limit of {mag_limit:.1f} to get sources with a minimum SNR of {min_snr}')	
 
-	# query Gaia for all the sources in the field
-	# grab distances and absolute mags from Bailer-Jones 'photogeo' catalog
+	# query Gaia DR3 for all the sources in the field brighter than the calculated magnitude limit
+	job = Gaia.launch_job_async("""
+									SELECT source_id, ra, ra_error, dec, dec_error, ref_epoch, pmra, pmra_error, pmdec, pmdec_error, parallax, parallax_error, parallax_over_error, ruwe, phot_bp_mean_mag, phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_flux, phot_bp_mean_flux_error, phot_g_mean_flux, phot_g_mean_flux_error, phot_rp_mean_flux, phot_rp_mean_flux_error, bp_rp, bp_g, g_rp, phot_variable_flag,radial_velocity, radial_velocity_error, non_single_star, teff_gspphot, logg_gspphot, mh_gspphot
+							 		FROM gaiadr3.gaia_source as gaia
+									WHERE gaia.ra BETWEEN {} AND {} AND
+											gaia.dec BETWEEN {} AND {} AND
+							 				gaia.phot_rp_mean_mag <= {}
+									ORDER BY phot_rp_mean_mag ASC
+								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, mag_limit)
+								)
+	res = job.get_results()
+	res['SOURCE_ID'].name = 'source_id' # why does this get returned in all caps? 
+
+	# Do a separate search for objects in the Bailer-Jones 'photogeo' catalog
 	job = Gaia.launch_job_async("""SELECT
-								source_id, ra, ra_error, dec, dec_error, ref_epoch, pmra, pmra_error, pmdec, pmdec_error, parallax, parallax_error, parallax_over_error, ruwe, phot_bp_mean_mag, phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_flux, phot_bp_mean_flux_error, phot_g_mean_flux, phot_g_mean_flux_error, phot_rp_mean_flux, phot_rp_mean_flux_error, bp_rp, bp_g, g_rp, phot_variable_flag,radial_velocity, radial_velocity_error, non_single_star,
-								teff_gspphot, logg_gspphot, mh_gspphot, r_med_geo, r_lo_geo, r_hi_geo, r_med_photogeo, r_lo_photogeo, r_hi_photogeo,
-								phot_bp_mean_mag-phot_rp_mean_mag AS bp_rp,
+								source_id, r_med_geo, r_lo_geo, r_hi_geo, r_med_photogeo, r_lo_photogeo, r_hi_photogeo,
 								phot_g_mean_mag - 5 * LOG10(r_med_geo) + 5 AS qg_geo,
 								phot_g_mean_mag - 5 * LOG10(r_med_photogeo) + 5 AS gq_photogeo
 									FROM (
@@ -255,9 +265,21 @@ def source_selection(file_list, logger, min_snr=6, edge_limit=20, plot=False, pl
 									ORDER BY phot_rp_mean_mag ASC
 								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, mag_limit)
 								)
-	res = job.get_results()
+	res2 = job.get_results()	
+	
+	# add the Bailer-Jones data into the main table 
+	for key in res2.keys()[1:]:
+		res[key] = np.zeros(len(res))
 
-
+	for i in range(len(res)):
+		if res['source_id'][i] in res2['source_id']:
+			ind = np.where(res['source_id'][i] == res2['source_id'])[0][0]
+			for key in res2.keys()[1:]:
+				res[key][i] = res2[key][ind]
+		else:
+			for key in res2.keys()[1:]:
+				res[key][i] = np.nan
+	
 	# cut to entries without masked pmra values; otherwise the crossmatch will break
 	problem_inds = np.where(res['pmra'].mask)[0]
 
@@ -296,6 +318,7 @@ def source_selection(file_list, logger, min_snr=6, edge_limit=20, plot=False, pl
 	res['e_Hmag'] = twomass_res['e_Hmag'][idx_gaia]
 	res['Kmag'] = twomass_res['Kmag'][idx_gaia]
 	res['e_Kmag'] = twomass_res['e_Kmag'][idx_gaia]
+
 	
 	# determine which chip the sources fall on 
 	# 0 = bottom, 1 = top 
@@ -613,7 +636,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	if centroid:
 		logger.info(f'Centroid function: {centroid_type}')
 	
-	# file_list = file_list[129:] #TESTING!!!
+	# file_list = file_list[98:] #TESTING!!!
 	
 	DARK_CURRENT = 0.00133 #e- pix^-1 s^-1, see Juliana's dissertation Table 4.1
 	NONLINEAR_THRESHOLD = 40000. #ADU
@@ -694,7 +717,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		bp_inds = np.where(bpm == 1)
 		
 
-	reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
+	# reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
 
 	#reference_image_hdu = fits.open(file_list[1])[0]
 
@@ -827,7 +850,14 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 
 			# fig, ax = plot_image(source_data)
 			# ax.scatter(source_x[:,i], source_y[:,i], marker='x', color='b')
-			centroid_x, centroid_y = centroid_sources(source_data,source_x[:,i], source_y[:,i], centroid_func=centroid_func, footprint=centroid_footprint, mask=mask)	
+			
+			# if interpolate_cosmics is enabled, do centroiding on the interpolated data
+			# otherwise a cosmic ray hit could throw off the centroiding 
+			if interpolate_cosmics:
+				centroid_x, centroid_y = centroid_sources(cosmic_interpolated_data,source_x[:,i], source_y[:,i], centroid_func=centroid_func, footprint=centroid_footprint, mask=mask)	
+			# else, determine the centroid on un-interpolated data
+			else:
+				centroid_x, centroid_y = centroid_sources(source_data,source_x[:,i], source_y[:,i], centroid_func=centroid_func, footprint=centroid_footprint, mask=mask)	
 			
 			# ax.scatter(centroid_x, centroid_y, marker='x', color='r')
 			# breakpoint()
@@ -1058,7 +1088,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		output_header.append('WCS Flag')
 
 		for j in range(n_sources):
-			source_name = f'S{j+1}'
+			source_name = f'S{j}'
 			output_list.append([f'{val:.4f}' for val in source_x[j]])
 			output_header.append(source_name+' X')
 			output_list.append([f'{val:.4f}' for val in source_y[j]])
@@ -1555,15 +1585,6 @@ def tierras_binner_inds(t, bin_mins=15):
 	
 	return bin_inds
 
-def plot_ref_positions(file_list, targ_and_refs):
-	im = fits.open(file_list[5])[0].data
-	fig, ax = plot_image(im)
-	ax.plot(targ_and_refs['x'][0], targ_and_refs['y'][0],'bx')
-	for i in range(1,len(targ_and_refs)):
-		ax.plot(targ_and_refs['x'][i], targ_and_refs['y'][i],'rx')
-		ax.text(targ_and_refs['x'][i]+5, targ_and_refs['y'][i]+5, f'R{i}',fontsize=14,color='r')
-	return 
-
 def juliana_binning(binsize, times, flux, flux_err):
 	'''Bins up a Tierras light curve following example from testextract.py 
 
@@ -1614,14 +1635,15 @@ def moving_average(x, w):
 	return np.convolve(x, np.ones(w), 'same') / w
 
 def optimal_lc_chooser(date, target, ffname, overwrite=True, start_time=0, stop_time=0, plot=False):
-	optimum_lc_file = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/optimal_lc.txt'
-	weight_file = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/night_weights.csv'
+
+	optimum_lc_file = f'/data/tierras/photometry/{date}/{target}/{ffname}/optimal_lc.txt'
+	weight_file = f'/data/tierras/photometry/{date}/{target}/{ffname}/night_weights.csv'
 
 	if (os.path.exists(optimum_lc_file)) and (os.path.exists(weight_file)) and not overwrite:
 		with open(optimum_lc_file) as f:
 			best_lc_path = f.readline()
 	else:
-		lc_list = np.array(glob(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/*phot*.csv'))
+		lc_list = np.array(glob(f'/data/tierras/photometry/{date}/{target}/{ffname}/*phot*.csv'))
 		sort_inds = np.argsort([float(i.split('/')[-1].split('_')[-1].split('.csv')[0]) for i in lc_list])
 		lc_list = lc_list[sort_inds]
 		if plot:
@@ -1632,6 +1654,7 @@ def optimal_lc_chooser(date, target, ffname, overwrite=True, start_time=0, stop_
 			type = lc_list[i].split('/')[-1].split('_')[1]+' '+lc_list[i].split('/')[-1].split('_')[-1].split('.csv')[0]
 			df = pd.read_csv(lc_list[i])
 			times = np.array(df['BJD TDB'])
+			breakpoint()
 			rel_targ_flux = np.array(df['Target Post-Processed Normalized Flux'])
 			rel_targ_flux_err = np.array(df['Target Post-Processed Normalized Flux Error'])
 			
@@ -1668,6 +1691,7 @@ def optimal_lc_chooser(date, target, ffname, overwrite=True, start_time=0, stop_
 				stddevs[j] = np.nanstd(flux_eval[bin_inds[j]])
 			med_stddev = np.nanmedian(stddevs)
 
+			breakpoint()
 			# #Option 2: just evaluate stddev
 			# med_stddev = np.std(flux_eval)
 
@@ -1709,6 +1733,225 @@ def optimal_lc_chooser(date, target, ffname, overwrite=True, start_time=0, stop_
 		
 
 	return Path(best_lc_path)
+
+def mearth_style_pat_weighted_flux(data_dict):
+	""" Use the comparison stars to derive a frame-by-frame zero-point magnitude. Also filter and mask bad cadences """
+	""" it's called "mearth_style" because it's inspired by the mearth pipeline """
+	""" this version works with fluxes bc I hate the magnitude system with a burning passion"""
+	
+	bjds = data_dict['BJD']
+	flux = data_dict['Flux']
+	flux_err = data_dict['Flux Error']
+	airmasses = data_dict['Airmass']
+	exptimes = data_dict['Exptime']
+	D = 130 #cm 
+	H = 2306 # m 
+
+	sigma_s = 0.09*D**(-2/3)*airmasses**(7/4)*(2*exptimes)**(-1/2)*np.exp(-H/8000)
+
+	# mask any cadences where the flux is negative for any of the sources 
+	mask = np.ones_like(bjds, dtype='bool')  # initialize a bad data mask
+	for i in range(len(flux)):
+		mask[np.where(flux[i] <= 0)[0]] = 0  
+
+	flux_corr_save = np.zeros_like(flux)
+	flux_err_corr_save = np.zeros_like(flux)
+	mask_save = np.zeros_like(flux)
+	weights_save = np.zeros((len(flux),len(flux)-1))
+
+	# loop over each star, calculate its zero-point correction using the other stars
+	for i in range(len(flux)):
+		# target_source_id = cluster_ids[i] # this represents the ID of the "target" *in the photometry files
+		regressor_inds = [j for j in np.arange(len(flux)) if i != j] # get the indices of the stars to use as the zero point calibrators; these represent the indices of the calibrators *in the data_dict arrays*
+		# regressor_source_ids = cluster_ids[regressor_inds] # these represent the IDs of the calibrators *in the photometry files*  
+
+		# grab target and source fluxes and apply initial mask 
+		target_flux = data_dict['Flux'][i]
+		target_flux_err = data_dict['Flux Error'][i]
+		regressors = data_dict['Flux'][regressor_inds]
+		regressors_err = data_dict['Flux Error'][regressor_inds]
+
+		target_flux[~mask] = np.nan 
+		target_flux_err[~mask] = np.nan 
+		for j in range(len(regressors)):
+			regressors[j][~mask] = np.nan 
+
+		tot_regressor = np.sum(regressors, axis=0)  # the total regressor flux at each time point = sum of comp star fluxes in each exposure
+		tot_regressor[~mask] = np.nan
+
+		# identify cadences with "low" flux by looking at normalized summed reference star fluxes
+		zp0s = tot_regressor/np.nanmedian(tot_regressor) 	
+		mask = np.ones_like(zp0s, dtype='bool')  # initialize another bad data mask
+		mask[np.where(zp0s < 0.8)[0]] = 0  # if regressor flux is decremented by 20% or more, this cadence is bad
+		target_flux[~mask] = np.nan 
+		target_flux_err[~mask] = np.nan 
+		for j in range(len(regressors)):
+			regressors[j][~mask] = np.nan 
+
+		# repeat the cs estimate now that we've masked out the bad cadences
+		# phot_regressor = np.nanpercentile(regressors, 90, axis=1)  # estimate photometric flux level for each star
+		norms = np.nanmedian(regressors, axis=1)
+		regressors_norm = regressors / norms[:, None]
+		regressors_err_norm = regressors_err / norms[:, None]
+
+		# mask out any exposures where any reference star is significantly discrepant 
+		mask = np.ones_like(target_flux, dtype='bool')
+		for j in range(len(regressors_norm)):
+			v, l, h = sigmaclip(regressors_norm[j][~np.isnan(regressors_norm[j])])
+			mask[np.where((regressors_norm[j] < l) | (regressors_norm[j] > h))[0]] = 0
+
+		target_flux[~mask] = np.nan 
+		target_flux_err[~mask] = np.nan 
+		for j in range(len(regressors)):
+			regressors[j][~mask] = np.nan 
+			regressors_err[j][~mask] = np.nan
+			regressors_norm[j][~mask] = np.nan
+			regressors_err_norm[j][~mask] = np.nan
+
+		# now calculate the weights for each regressor
+		# give stars weights equal to 1/(median photometric errors)**2
+		# weights_init = np.ones(len(regressors))/len(regressors)
+		weights_init = 1/(np.nanmedian(regressors_err_norm,axis=1)**2)
+		weights_init /= np.nansum(weights_init)
+	
+		# do a 'crude' weighting loop to figure out which regressors, if any, should be totally discarded	
+		delta_weights = np.zeros(len(regressors))+999 # initialize
+		threshold = 1e-4 # delta_weights must converge to this value for the loop to stop
+		weights_old = weights_init
+		full_ref_inds = np.arange(len(regressors))
+		while len(np.where(delta_weights>threshold)[0]) > 0:
+			stddevs_measured = np.zeros(len(regressors))		
+			stddevs_expected = np.zeros(len(regressors))
+
+			# loop over each regressor
+			for jj in range(len(regressors)):
+				F_t = regressors[jj]
+				N_t = regressors_err[jj]
+
+				# make its zeropoint correction using the flux of all the *other* regressors
+				use_inds = np.delete(full_ref_inds, jj)
+
+				# re-normalize the weights to sum to one
+				weights_wo_jj = weights_old[use_inds]
+				weights_wo_jj /= np.nansum(weights_wo_jj)
+				
+				# create a zeropoint correction using those weights 
+				F_e = np.matmul(weights_wo_jj, regressors[use_inds])
+				N_e = np.sqrt(np.matmul(weights_wo_jj**2, regressors_err[use_inds]**2))
+
+				# calculate the relative flux 
+				F_rel_flux = F_t / F_e
+				sigma_rel_flux = np.sqrt((N_t/F_e)**2 + (F_t*N_e/(F_e**2))**2)
+
+				# calculate total error on F_rel flux from sigma_rel_flux and sigma_scint				
+				sigma_scint = 1.5*sigma_s*np.sqrt(1 + 1/(len(use_inds)))
+				sigma_tot = np.sqrt(sigma_rel_flux**2 + sigma_scint**2)
+
+				# renormalize
+				norm = np.nanmedian(F_rel_flux)
+				F_corr = F_rel_flux/norm 
+				sigma_tot_corr = sigma_tot/norm 	
+	
+				# record the standard deviation of the corrected flux
+				stddevs_measured[jj] = np.nanstd(F_corr)
+				stddevs_expected[jj] = np.nanmean(sigma_tot_corr)
+
+			# update the weights using the measured standard deviations
+			weights_new = 1/stddevs_measured**2
+			weights_new /= np.nansum(weights_new)
+			delta_weights = abs(weights_new-weights_old)
+			weights_old = weights_new
+
+		weights = weights_new
+
+		# determine if any references should be totally thrown out based on the ratio of their measured/expected noise
+		noise_ratios = stddevs_measured/stddevs_expected
+		# the noise ratio threshold will depend on how many bad/variable reference stars were used in the ALC
+		# sigmaclip the noise ratios and set the upper limit to the n-sigma upper bound 
+		# v, l, h = sigmaclip(noise_ratios, 2, 2)
+		# weights[np.where(noise_ratios>h)[0]] = 0
+
+		weights[np.where(noise_ratios>5)[0]] = 0
+		weights /= sum(weights)
+		
+		if len(np.where(weights == 0)[0]) > 0:
+			# now repeat the weighting loop with the bad refs removed 
+			delta_weights = np.zeros(len(regressors))+999 # initialize
+			threshold = 1e-6 # delta_weights must converge to this value for the loop to stop
+			weights_old = weights
+			full_ref_inds = np.arange(len(regressors))
+			count = 0
+			while len(np.where(delta_weights>threshold)[0]) > 0:
+				stddevs_measured = np.zeros(len(regressors))
+				stddevs_expected = np.zeros(len(regressors))
+
+				for jj in range(len(regressors)):
+					if weights_old[jj] == 0:
+						continue
+					F_t = regressors[jj]
+					N_t = regressors_err[jj]
+		
+					use_inds = np.delete(full_ref_inds, jj)
+					weights_wo_jj = weights_old[use_inds]
+					weights_wo_jj /= np.nansum(weights_wo_jj)
+					
+					# create a zeropoint correction using those weights 
+					F_e = np.matmul(weights_wo_jj, regressors[use_inds])
+					N_e = np.sqrt(np.matmul(weights_wo_jj**2, regressors_err[use_inds]**2))
+
+					# calculate the relative flux 
+					F_rel_flux = F_t / F_e
+					sigma_rel_flux = np.sqrt((N_t/F_e)**2 + (F_t*N_e/(F_e**2))**2)
+
+					# calculate total error on F_rel flux from sigma_rel_flux and sigma_scint				
+					sigma_scint = 1.5*sigma_s*np.sqrt(1 + 1/(len(use_inds)))
+					sigma_tot = np.sqrt(sigma_rel_flux**2 + sigma_scint**2)
+
+					# renormalize
+					norm = np.nanmedian(F_rel_flux)
+					F_corr = F_rel_flux/norm 
+					sigma_tot_corr = sigma_tot/norm 	
+		
+					# record the standard deviation of the corrected flux
+					stddevs_measured[jj] = np.nanstd(F_corr)
+					stddevs_expected[jj] = np.nanmean(sigma_tot_corr)
+				
+				weights_new = 1/(stddevs_measured**2)
+				weights_new /= np.sum(weights_new[~np.isinf(weights_new)])
+				weights_new[np.isinf(weights_new)] = 0
+				delta_weights = abs(weights_new-weights_old)
+				weights_old = weights_new
+				count += 1
+
+		weights = weights_new
+
+		
+		# calculate the zero-point correction
+
+		F_e = np.matmul(weights, regressors)
+		N_e = np.sqrt(np.matmul(weights**2, regressors_err**2))	
+		
+		flux_corr = target_flux / F_e
+		err_corr = np.sqrt((target_flux_err/F_e)**2 + (target_flux*N_e/(F_e**2))**2)
+
+		# renormalize
+		norm = np.nanmedian(flux_corr)
+		flux_corr /= norm 
+		err_corr /= norm 
+
+		mask_save[i] = ~np.isnan(flux_corr)
+		flux_corr_save[i] = flux_corr
+		flux_err_corr_save[i] = err_corr
+		weights_save[i] = weights
+
+
+	output_dict = copy.deepcopy(data_dict)
+	output_dict['ZP Mask'] = mask_save
+	output_dict['Corrected Flux'] = flux_corr_save
+	output_dict['Corrected Flux Error'] = flux_err_corr_save
+	output_dict['Weights'] = weights_save
+
+	return output_dict
 
 def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 	'''Measures the average FWHM of the target across a set of images to determine a range of apertures for performing photometry.
@@ -2455,18 +2698,16 @@ def main(raw_args=None):
 
 	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=True)
 
-	breakpoint()
-
 	#Determine the optimal aperture size
-	optimal_lc_path = lc_post_processing(date, target, ffname, overwrite=True)
-	#optimal_lc_path = optimal_lc_chooser(date,target,ffname,plot=True,start_time=0,stop_time=0)
-	print(f'Optimal light curve: {optimal_lc_path}')
+	# optimal_lc_path = lc_post_processing(date, target, ffname, overwrite=True)
+	# optimal_lc_path = optimal_lc_chooser(date, target, ffname, plot=False,start_time=0, stop_time=0)
+	# print(f'Optimal light curve: {optimal_lc_path}')
 	
 	#Use the optimal aperture to plot the target light curve
-	plot_target_summary(optimal_lc_path)
-	plot_target_lightcurve(optimal_lc_path)
-	plot_ref_lightcurves(optimal_lc_path)
-	plot_raw_fluxes(optimal_lc_path)
+	# plot_target_summary(optimal_lc_path)
+	# plot_target_lightcurve(optimal_lc_path)
+	# plot_ref_lightcurves(optimal_lc_path)
+	# plot_raw_fluxes(optimal_lc_path)
 
 if __name__ == '__main__':
 	main()

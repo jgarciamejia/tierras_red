@@ -25,9 +25,11 @@ class ImageScrubber:
 		self.phot_file_list = phot_file_list
 		self.phot_dfs, self.phot_df_file_names = self.load_photometry(phot_file_list)
 
+		self.date = self.file_list[0].name.split('.')[0]
+		self.target = self.file_list[0].name.split('.')[2].split('_')[0]
 
 		self.master = master
-		self.master.title('Tierras Image Scrubber')
+		self.master.title(f'Tierras Image Scrubber: {self.target} on {self.date}')
 
 		self.image_label = tk.Label(self.master)
 		self.image_label.pack()	
@@ -54,11 +56,15 @@ class ImageScrubber:
 		self.update_button = tk.Button(self.master, text="Update", command=self.update_image)
 		self.update_button.pack()			
 
-		self.n_sources = int(self.phot_dfs[0].keys()[-1].split(' ')[0][1:])
+		if len(self.phot_dfs) == 0:
+			self.n_sources = np.nan
+		else:
+			self.n_sources = int(self.phot_dfs[0].keys()[-1].split(' ')[0][1:])
 
 		target_list = ['Full frame']
-		for i in range(self.n_sources):
-			target_list.append('S'+str(i+1))
+		if not np.isnan(self.n_sources):
+			for i in range(self.n_sources):
+				target_list.append('S'+str(i))
 		self.target_list = target_list	
 
 		self.selected_target= tk.StringVar(self.master, value=self.target_list[0])  # Default to viewing the 'full frame'
