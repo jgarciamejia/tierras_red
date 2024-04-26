@@ -52,7 +52,7 @@ def get_yday_date():
     # Calculate yesterday's date
     yesterday = today - timedelta(days=1)
     # Format yesterday's date as "YYYYMMDD"
-    formatted_date = yesterday.strftime("%Y%m%d")
+    formatted_date = yesterday.strftime("%Y%m%d") #yesterday
     # Print the result
     return formatted_date
 
