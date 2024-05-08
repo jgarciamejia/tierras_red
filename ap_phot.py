@@ -147,13 +147,13 @@ def reference_star_chooser(file_list, target_position=(0,0), plot=True, overwrit
 	'''
 		PURPOSE: select suitable reference stars for a Tierras target using Gaia
 		INPUTS: 
-			file_list (array): list of paths to Tierras images. If no existing stacked image exists in the /data/tierras/targets/{field} directory, one will be made using images from this list
+			file_list (array): list of paths to Tierras images. If no existing stacked image exists in the /data/tierras/fields/{field} directory, one will be made using images from this list
 
 			target_position (tuple, optional): the user-specified target pixel position. If (0,0), the code will use the RA/Dec coordinates of the target in the header of the stacked field image and the associated WCS to estimate its position. 
 
 			plot (bool, optional): whether or not to produce/save plots of the selected reference stars in the field and a color-magnitude diagram
 
-			overwrite (bool, optional): whether or not to restore previously saved output from the /data/tierras/targets/{field}/ directory
+			overwrite (bool, optional): whether or not to restore previously saved output from the /data/tierras/fields/{field}/ directory
 
 			dimness_limit (float, optional): the minimum mean flux ratio in Gaia Rp-band that a candidate reference can have to the target and still be retained as a reference
 
@@ -171,7 +171,7 @@ def reference_star_chooser(file_list, target_position=(0,0), plot=True, overwrit
 	field = file_list[0].parent.parent.name
 
 	#Start by checking for existing csv file about target/reference positions
-	reference_file_path = Path('/data/tierras/targets/'+field+'/'+field+'_target_and_ref_stars.csv')
+	reference_file_path = Path('/data/tierras/fields/'+field+'/'+field+'_target_and_ref_stars.csv')
 	if (reference_file_path.exists() == False) or (overwrite==True):
 		print('No saved target/reference star positions found!\n')
 		if not reference_file_path.parent.exists():
@@ -182,7 +182,7 @@ def reference_star_chooser(file_list, target_position=(0,0), plot=True, overwrit
 		if not stacked_image_path.exists():
 			print('No stacked field image found!')
 			stacked_hdu = align_and_stack_images(file_list)
-			stacked_image_path = Path('/data/tierras/targets/'+field+'/'+field+'_stacked_image.fits')
+			stacked_image_path = Path('/data/tierras/fields/'+field+'/'+field+'_stacked_image.fits')
 			stacked_hdu.writeto(stacked_image_path, overwrite=True)
 			set_tierras_permissions(stacked_image_path)
 			print(f"Saved stacked field to {stacked_image_path}")
@@ -195,7 +195,7 @@ def reference_star_chooser(file_list, target_position=(0,0), plot=True, overwrit
 		return output_df
 
 	PLATE_SCALE = 0.432 
-	stacked_image_path = f'/data/tierras/targets/{field}/{field}_stacked_image.fits'
+	stacked_image_path = f'/data/tierras/fields/{field}/{field}_stacked_image.fits'
 	hdu = fits.open(stacked_image_path)
 	data = hdu[0].data
 	header = hdu[0].header
@@ -803,7 +803,7 @@ def circular_aperture_photometry(file_list, targ_and_refs, ap_radii, an_in=40., 
 		from astroscrappy import detect_cosmics 
 		bp_inds = np.where(bpm == 1)
 
-	reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
+	reference_image_hdu = fits.open('/data/tierras/fields/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
 
 	#reference_image_hdu = fits.open(file_list[1])[0]
 
@@ -1531,7 +1531,7 @@ def plot_target_lightcurve(lc_path,bin_mins=15):
 	date = lc_path.parent.parent.parent.name
 
 	df = pd.read_csv(lc_path)
-	# targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
+	# targ_and_refs = pd.read_csv(f'/data/tierras/fields/{target}/{target}_target_and_ref_stars.csv')
 	# n_refs = len(targ_and_refs)
 
 
@@ -1629,7 +1629,7 @@ def plot_ref_lightcurves(lc_path, bin_mins=15):
 		os.remove(file)
 
 	df = pd.read_csv(lc_path)
-	# targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
+	# targ_and_refs = pd.read_csv(f'/data/tierras/fields/{target}/{target}_target_and_ref_stars.csv')
 	# n_refs = len(targ_and_refs)-1
 
 	n_refs = int(df.keys()[-1].split('Ref ')[1].split(' ')[0])
@@ -1985,7 +1985,7 @@ def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 		#bpm = load_bad_pixel_mask()
 
 		#load in the reference image 
-		reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
+		reference_image_hdu = fits.open('/data/tierras/fields/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
 
 		reference_image_header = reference_image_hdu.header
 		reference_wcs = WCS(reference_image_header)
