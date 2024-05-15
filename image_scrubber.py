@@ -17,6 +17,7 @@ from glob import glob
 import numpy as np
 import pandas as pd 
 import os
+import pyarrow.parquet as pq 
 
 class ImageScrubber:
 	def __init__(self, master, file_list, phot_file_list):
@@ -59,7 +60,7 @@ class ImageScrubber:
 		if len(self.phot_dfs) == 0:
 			self.n_sources = np.nan
 		else:
-			self.n_sources = int(self.phot_dfs[0].keys()[-1].split(' ')[0][1:])
+			self.n_sources = int(self.phot_dfs[0].column_names[-1].split(' ')[0][1:])+1
 
 		target_list = ['Full frame']
 		if not np.isnan(self.n_sources):
@@ -127,12 +128,12 @@ class ImageScrubber:
 	def load_photometry(self, file_list):
 		phot_dfs = []
 		phot_filenames = []
-		print(f'Reading in {len(file_list)} photometry files.')
-		for filename in file_list:
-			df = pd.read_csv(filename)
-			if df is not None:
-				phot_dfs.append(df)
-				phot_filenames.append(str(filename).split('/')[-1])
+		print(f'Reading in 1 photometry file.')
+		filename = file_list[0]
+		df = pq.read_table(filename)
+		if df is not None:
+			phot_dfs.append(df)
+			phot_filenames.append(str(filename).split('/')[-1])
 		return phot_dfs, phot_filenames
 
 	def load_selected_target(self, event=None):
@@ -143,8 +144,8 @@ class ImageScrubber:
 			self.xlim = (0,4096)
 			self.ylim = (0,2048)
 		else:
-			source_x = self.phot_dfs[0][f'{source_name} X'][index]
-			source_y = self.phot_dfs[0][f'{source_name} Y'][index]
+			source_x = self.phot_dfs[0][f'{source_name} X'][index].as_py()
+			source_y = self.phot_dfs[0][f'{source_name} Y'][index].as_py()
 			self.source_x = source_x 
 			self.source_y = source_y 
 
@@ -233,7 +234,7 @@ def main(raw_args=None):
 	ffname = args.ffname 
 
 	image_files = get_flattened_files(date, target, ffname)
-	photometry_files = np.sort(glob(f'/data/tierras/photometry/{date}/{target}/{ffname}/*ap_phot*.csv'))
+	photometry_files = np.sort(glob(f'/data/tierras/photometry/{date}/{target}/{ffname}/*ap_phot*.parquet'))
 	
 	root = tk.Tk()
 	app = ImageScrubber(root, image_files, photometry_files)

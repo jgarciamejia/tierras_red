@@ -56,6 +56,9 @@ import pickle
 import shutil
 import warnings
 from etc_pat import etc 
+from astropy.modeling.functional_models import Gaussian2D
+import pyarrow as pa 
+import pyarrow.parquet as pq 
 
 # Suppress all Astropy warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="astropy")
@@ -148,7 +151,7 @@ def plot_image(data,use_wcs=False,cmap_name='viridis'):
 	plt.tight_layout()
 	return fig, ax
 
-def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False):	
+def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01):	
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
 		INPUTS: 
@@ -226,13 +229,16 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 
 	# use the exposure time calculator to get an estimate for the rp magnitude limit that will give the desired minimum SNR 
 	# this assumes that all the images are taken at the same exposure time
-	rp_mags = np.arange(7,22,0.1)
-	snrs = np.zeros(len(rp_mags))
-	for ii in range(len(rp_mags)):
-		rp_mag, snr, exptime = etc(rp_mag=rp_mags[ii], exptime=header['EXPTIME'])
-		snrs[ii] = snr 
-	mag_limit = rp_mags[np.argmin(abs(snrs-min_snr))]
-	logger.debug(f'Using a Gaia Rp mag limit of {mag_limit:.1f} to get sources with a minimum SNR of {min_snr}')	
+	# rp_mags = np.arange(7,22,0.1)
+	# snrs = np.zeros(len(rp_mags))
+	# for ii in range(len(rp_mags)):
+	# 	rp_mag, snr, exptime = etc(rp_mag=rp_mags[ii], exptime=header['EXPTIME'])
+	# 	snrs[ii] = snr 
+	# mag_limit = rp_mags[np.argmin(abs(snrs-min_snr))]
+	# logger.debug(f'Using a Gaia Rp mag limit of {mag_limit:.1f} to get sources with a minimum SNR of {min_snr}')	
+
+	mag_limit = 16
+	logger.debug(f'Using a Gaia RP mag limit of {mag_limit:.1f}.')
 
 	# query Gaia DR3 for all the sources in the field brighter than the calculated magnitude limit
 	job = Gaia.launch_job_async("""
@@ -329,6 +335,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	#Cut to sources that actually fall in the image
 	use_inds = np.where((tierras_pixel_coords[0]>0)&(tierras_pixel_coords[0]<im_shape[1]-1)&(tierras_pixel_coords[1]>0)&(tierras_pixel_coords[1]<im_shape[0]-1))[0]
 	res = res[use_inds]
+	res_full = copy.deepcopy(res)	
 
 	logger.debug(f'Found {len(res)} sources in Gaia query.')
 
@@ -350,6 +357,50 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	res.remove_rows(bad_inds_half)
 	logger.debug(f'Removed {len(bad_inds_half)} sources that were too near the divide between the upper and lower detector halves.')
 
+	# # estimate contamination 
+	# inds_to_remove = []
+	# xx, yy = np.meshgrid(np.arange(-50, 50), np.arange(-50, 50)) # grid of pixels over which to simulate images
+	# seeing_fwhm = 3/.432 #pix, assume 3" seeing
+	# seeing_sigma = seeing_fwhm / (2*np.sqrt(2*np.log(2)))
+
+	# for i in range(len(res)):
+	# 	print(f'Estimating contamination for source {i+1} of {len(res)}')
+	# 	distances = ((res['X pix'][i]-res_full['X pix'])**2 + (res['Y pix'][i]-res_full['Y pix'])**2)**0.5
+	# 	nearby_inds = np.where(distances <= 100)[0]
+	# 	nearby_inds = nearby_inds[np.where(distances[nearby_inds]!=0)[0]]
+	# 	if len(nearby_inds) > 0:
+	# 		source_rp = res['phot_rp_mean_mag'][i]
+	# 		source_x = res['X pix'][i]
+	# 		source_y = res['Y pix'][i]
+	# 		nearby_rp = res_full['phot_rp_mean_mag'][nearby_inds]
+	# 		nearby_x = res_full['X pix'][nearby_inds] - source_x
+	# 		nearby_y = res_full['Y pix'][nearby_inds] - source_y 
+
+	# 		# model the source in question as a 2D gaussian
+	# 		source_model = Gaussian2D(x_mean=0, y_mean=0, amplitude=1/(2*np.pi*seeing_sigma**2), x_stddev=seeing_sigma, y_stddev=seeing_sigma)
+	# 		sim_img = source_model(xx, yy)
+
+	# 		# add in gaussian models for the nearby sources
+	# 		for jj in range(len(nearby_rp)):
+	# 			flux = 10**(-(nearby_rp[jj]-source_rp)/2.5)
+	# 			contaminant_model = Gaussian2D(x_mean=nearby_x[jj], y_mean=nearby_y[jj], amplitude=flux/(2*np.pi*seeing_sigma**2), x_stddev=seeing_sigma, y_stddev=seeing_sigma)
+	# 			contaminant = contaminant_model(xx,yy)
+	# 			sim_img += contaminant
+			
+	# 		# plt.figure()
+	# 		# plt.imshow(sim_img, origin='lower', norm=simple_norm(sim_img, min_percent=1, max_percent=80))
+			
+	# 		# estimate contamination by doing aperture photometry on the simulated image
+	# 		# if the measured flux exceeds 1 by a chosen threshold, record the source's index so it can be removed
+	# 		ap = CircularAperture((sim_img.shape[1]/2, sim_img.shape[0]/2), r=2*seeing_fwhm)
+	# 		phot_table = aperture_photometry(sim_img, ap)
+	# 		contamination = phot_table['aperture_sum'][0] - 1
+	# 		if contamination > contamination_limit:
+	# 			inds_to_remove.append([i])
+	# res.remove_rows(inds_to_remove)
+	
+	# logger.debug(f'Removed {len(inds_to_remove)} sources with a contamination estimate greater than {contamination_limit}.')
+
 	logger.info(f'Found {len(res)} sources!')
 	
 	if plot:
@@ -363,6 +414,8 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 		ax1.set_ylabel('M$_{G}$', fontsize=14)
 		ax1.tick_params(labelsize=12)
 		plt.tight_layout()
+
+		breakpoint()
 	
 	# create the output dataframe consisting of the target as the 0th entry and the reference stars
 	output_table = copy.deepcopy(res)
@@ -372,6 +425,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	set_tierras_permissions(source_path)
 
 	logger.debug(f'Saved source csv to {source_path}')
+	breakpoint()
 	return output_df
 
 def load_bad_pixel_mask():
@@ -582,7 +636,7 @@ def generate_square_cutout(image, position, size):
 
 	return cutout, position_in_cutout
 
-def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35, an_out=55, type='fixed', centroid=False, centroid_type='centroid_2dg', interpolate_cosmics=False):
+def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35, an_out=55, phot_type='fixed', centroid=False, centroid_type='centroid_2dg', interpolate_cosmics=False, measure_fwhm=False):
 	"""
 	Does circular aperture photometry on sources in a list of reduced Tierras images for an array of aperture sizes. Writes out photometry csv files to /data/tierras/lightcurves/date/target/ffname/.
 
@@ -619,7 +673,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
 	
-	# file_list = file_list[50:] #TESTING!!!	
+	# file_list = file_list[-10:] #TESTING!!!	
 	n_files = len(file_list)
 	n_sources = len(sources)
 	n_aps = len(ap_radii)
@@ -628,7 +682,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	logger.info(f'Target: {target}')
 	logger.info(f'Date: {date}')
 	logger.info(f'ffname: {ffname}')
-	logger.info(f'Photometry type: {type}')
+	logger.info(f'Photometry type: {phot_type}')
 	logger.info(f'Ap radii: {ap_radii}')
 	logger.info(f'An in: {an_in}')
 	logger.info(f'An out: {an_out}')
@@ -654,33 +708,33 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	mjd_utc = np.zeros(n_files, dtype='float')
 	jd_utc = np.zeros(n_files,dtype='float')
 	bjd_tdb = np.zeros(n_files,dtype='float')
-	airmasses = np.zeros(n_files,dtype='float16')
-	ccd_temps = np.zeros(n_files,dtype='float16')
-	exp_times = np.zeros(n_files,dtype='float16')
-	dome_temps = np.zeros(n_files,dtype='float16')
-	focuses = np.zeros(n_files,dtype='float16')
-	dome_humidities = np.zeros(n_files,dtype='float16')
-	sec_temps = np.zeros(n_files,dtype='float16')
-	ret_temps = np.zeros(n_files,dtype='float16')
-	pri_temps = np.zeros(n_files,dtype='float16')
-	rod_temps = np.zeros(n_files,dtype='float16')
-	cab_temps = np.zeros(n_files,dtype='float16')
-	inst_temps = np.zeros(n_files,dtype='float16')
-	temps = np.zeros(n_files,dtype='float16')
-	humidities = np.zeros(n_files,dtype='float16')
-	dewpoints = np.zeros(n_files,dtype='float16')
-	sky_temps = np.zeros(n_files,dtype='float16')
-	pressures = np.zeros(n_files,dtype='float16')
-	return_pressures = np.zeros(n_files,dtype='float16')
-	supply_pressures = np.zeros(n_files,dtype='float16')
-	hour_angles = np.zeros(n_files,dtype='float16')
-	dome_azimuths = np.zeros(n_files,dtype='float16')
-	wind_speeds = np.zeros(n_files,dtype='float16')
-	wind_gusts = np.zeros(n_files,dtype='float16')
-	wind_dirs = np.zeros(n_files,dtype='float16')
+	airmasses = np.zeros(n_files,dtype='float32')
+	ccd_temps = np.zeros(n_files,dtype='float32')
+	exp_times = np.zeros(n_files,dtype='float32')
+	dome_temps = np.zeros(n_files,dtype='float32')
+	focuses = np.zeros(n_files,dtype='float32')
+	dome_humidities = np.zeros(n_files,dtype='float32')
+	sec_temps = np.zeros(n_files,dtype='float32')
+	ret_temps = np.zeros(n_files,dtype='float32')
+	pri_temps = np.zeros(n_files,dtype='float32')
+	rod_temps = np.zeros(n_files,dtype='float32')
+	cab_temps = np.zeros(n_files,dtype='float32')
+	inst_temps = np.zeros(n_files,dtype='float32')
+	temps = np.zeros(n_files,dtype='float32')
+	humidities = np.zeros(n_files,dtype='float32')
+	dewpoints = np.zeros(n_files,dtype='float32')
+	sky_temps = np.zeros(n_files,dtype='float32')
+	pressures = np.zeros(n_files,dtype='float32')
+	return_pressures = np.zeros(n_files,dtype='float32')
+	supply_pressures = np.zeros(n_files,dtype='float32')
+	hour_angles = np.zeros(n_files,dtype='float32')
+	dome_azimuths = np.zeros(n_files,dtype='float32')
+	wind_speeds = np.zeros(n_files,dtype='float32')
+	wind_gusts = np.zeros(n_files,dtype='float32')
+	wind_dirs = np.zeros(n_files,dtype='float32')
 
-	loop_times = np.zeros(n_files,dtype='float16')
-	lunar_distance = np.zeros(n_files,dtype='float16')
+	loop_times = np.zeros(n_files,dtype='float32')
+	lunar_distance = np.zeros(n_files,dtype='float32')
 	
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH SOURCE IN EACH FILE
 	source_x = np.zeros((n_sources,n_files),dtype='float32')
@@ -696,9 +750,9 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	non_linear_flags = np.zeros((n_aps,n_sources,n_files),dtype='bool')
 	saturated_flags = np.zeros((n_aps,n_sources,n_files),dtype='bool')	
 	interpolation_flags = np.zeros((n_aps,n_sources,n_files),dtype='bool')
-	source_radii = np.zeros((n_aps,n_files),dtype='float16')
-	an_in_radii = np.zeros((n_aps,n_files),dtype='float16')
-	an_out_radii = np.zeros((n_aps,n_files),dtype='float16')
+	source_radii = np.zeros((n_aps,n_files),dtype='float32')
+	an_in_radii = np.zeros((n_aps,n_files),dtype='float32')
+	an_out_radii = np.zeros((n_aps,n_files),dtype='float32')
 	
 	#Load in the stacked image of the field that was used for source identification. 
 	#All images will be cross-correlated with this to determine aperture positions. 
@@ -747,6 +801,9 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		EXPTIME = source_header['EXPTIME']
 		RA = source_header['RA']
 		DEC = source_header['DEC']
+
+		v_dark = DARK_CURRENT*EXPTIME 
+		v_read = READ_NOISE**2 
 
 		#SAVE ANCILLARY DATA
 		filenames.append(file_list[i].name)
@@ -810,8 +867,8 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 
 		if interpolate_cosmics:
 			data_copy = copy.deepcopy(source_data)
-			cosmic_mask, cosmic_interpolated_data = detect_cosmics(data_copy, gain=GAIN, sigclip=7, sigfrac=0.1, objlim=1)
-
+			bkg = Background2D(source_data, box_size=32)
+			cosmic_mask, cosmic_interpolated_data = detect_cosmics(data_copy, gain=GAIN, sigclip=7, sigfrac=0.1, objlim=50, inmask=bpm, readnoise=READ_NOISE, satlevel=65536*GAIN, inbkg=bkg.background)
 
 		#UPDATE SOURCE POSITIONS
 		#METHOD 1: WCS
@@ -824,11 +881,14 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 			logger.info(f'WARNING: header indicates astrometric solution with RMS of {source_header["STDCRMS"]}, WCS positions may not be accurate.')
 			wcs_flags[i] = 1
 
-		transformed_pixel_coordinates = np.array([source_wcs.world_to_pixel((SkyCoord(sources['ra_tierras'][i]*u.deg, sources['dec_tierras'][i]*u.deg))) for i in range(n_sources)])
+		# transformed_pixel_coordinates = np.array([source_wcs.world_to_pixel((SkyCoord(sources['ra_tierras'][i]*u.deg, sources['dec_tierras'][i]*u.deg))) for i in range(n_sources)])
+
 		
 		#Save transformed pixel coordinates of sources
-		source_x[:,i] = transformed_pixel_coordinates[:,0]
-		source_y[:,i] = transformed_pixel_coordinates[:,1]
+		# source_x[:,i] = transformed_pixel_coordinates[:,0]
+		# source_y[:,i] = transformed_pixel_coordinates[:,1]
+
+		source_x[:,i], source_y[:,i] = source_wcs.world_to_pixel(SkyCoord(sources['ra_tierras']*u.deg, sources['dec_tierras']*u.deg))
 
 		# fig2, ax2 = plot_image(source_data)
 		# for j in range(len(source_x[:,i])):
@@ -837,10 +897,10 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 
 		source_positions = [(source_x[j,i], source_y[j,i]) for j in range(n_sources)]
 
-		if (sum(source_x[:,i] < 0) + sum(source_y[:,i] < 0) + sum(source_x[:,i] > source_data.shape[1]) + sum(source_y[:,i] > source_data.shape[0])) > 0:
-			warnings.warn('Sources off chip! Skipping photometry.')
-			continue 
-
+		# if (sum(source_x[:,i] < 0) + sum(source_y[:,i] < 0) + sum(source_x[:,i] > source_data.shape[1]) + sum(source_y[:,i] > source_data.shape[0])) > 0:
+		# 	warnings.warn('Sources off chip! Skipping photometry.')
+		# 	continue 
+		
 		# # logger.debug(f'Source x (WCS): {[f"{item:.2f}" for item in source_x[:,i]]}')
 		# logger.debug(f'Source y (WCS): {[f"{item:.2f}" for item in source_y[:,i]]}')
 		if centroid:
@@ -873,10 +933,10 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 			source_positions = [(source_x[j,i], source_y[j,i]) for j in range(n_sources)]
 	
 		logger.debug(f'Source position loop time: {time.time()-tcent:.2f} s')
-
+			
 		# Do photometry
 		# Set up apertures
-		if type == 'fixed':
+		if phot_type == 'fixed':
 			apertures = [CircularAperture(source_positions,r=ap_radii[k]) for k in range(len
 			(ap_radii))]
 
@@ -891,6 +951,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		for j in range(len(annuli)):
 			source_sky_ADU[j,i] = np.mean(sigmaclip(annulus_masks[j].get_values(source_data),2,2)[0])
 		logger.debug(f'Bkg loop time: {time.time()-tbkg:.2f} s')
+		
 
 		tphot = time.time()
 		# do photometry on the *sources*
@@ -899,6 +960,8 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		# Calculate sky-subtracted flux
 		for k in range(n_aps):
 			source_radii[k, i] = ap_radii[k]
+			an_in_radii[k, i] = an_in 
+			an_out_radii[k, i] = an_out
 			ap_area = apertures[k].area
 			
 			# for 1d background, subtract off the average bkg value measured in the annulus times the aperture area
@@ -907,8 +970,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 			# calculate photometric uncertainty IN ADU following Stefansson et al. (2017) formalism
 			v_star = source_minus_sky_ADU[k,:,i]*GAIN 
 			v_sky = source_sky_ADU[:,i]*GAIN 
-			v_dark = DARK_CURRENT*EXPTIME 
-			v_read = READ_NOISE**2 
+			
 			sigma_ccd = np.sqrt(v_star + ap_area*(1+ap_area/nb)*(v_sky + v_dark + v_read))/GAIN 
 
 			# Calculate uncertainty
@@ -943,184 +1005,115 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 						interpolated_measurement -= source_sky_ADU[j,i]*np.pi*ap_radii[k]**2
 						source_minus_sky_ADU[k,j,i] = interpolated_measurement
 						interpolation_flags[k,j,i] = 1
+
+						breakpoint()
 			logger.debug(f'Cosmic interpolation time: {time.time()-tcosmic:.2f} s')
-								
-		tfwhm = time.time()
-		#Measure FWHM 
-		k = 0
-		cutout_size = 30
-		g_init = models.Gaussian2D(amplitude=1,x_mean=cutout_size/2,y_mean=cutout_size/2, x_stddev=3, y_stddev=3)
-		g_init.theta.bounds = (0, np.pi)
-		g_init.x_stddev.bounds = (1,10)
-		g_init.y_stddev.bounds = (1,10)
 
-		# pre-compute meshgrid of pixel indices for square cutouts (which will be the case for all sources except those near the edges)
-		xx2, yy2 = np.meshgrid(np.arange(cutout_size),np.arange(cutout_size))
+		if measure_fwhm:						
+			tfwhm = time.time()
+			#Measure FWHM 
+			k = 0
+			cutout_size = 30
+			g_init = models.Gaussian2D(amplitude=1,x_mean=cutout_size/2,y_mean=cutout_size/2, x_stddev=3, y_stddev=3)
+			g_init.theta.bounds = (0, np.pi)
+			g_init.x_stddev.bounds = (1,10)
+			g_init.y_stddev.bounds = (1,10)
 
-		# TODO: this loop appears to slow down over time, WHY!?
-		# this is, in general, the slowest loop of the program. How can we make it faster??
-		for j in range(len(source_positions)):
-			g_2d_cutout, cutout_pos = generate_square_cutout(source_data, source_positions[j], cutout_size)
-			cutout_shape = g_2d_cutout.shape
+			# pre-compute meshgrid of pixel indices for square cutouts (which will be the case for all sources except those near the edges)
+			xx2, yy2 = np.meshgrid(np.arange(cutout_size),np.arange(cutout_size))
 
-			bkg = np.median(g_2d_cutout)
-			# bkg = np.mean(sigmaclip(g_2d_cutout,2,2)[0])
+			# TODO: this loop appears to slow down over time, WHY!?
+			# this is, in general, the slowest loop of the program. How can we make it faster??
+			for j in range(len(source_positions)):
+				try:
+					g_2d_cutout, cutout_pos = generate_square_cutout(source_data, source_positions[j], cutout_size)
+				except:
+					source_x_fwhm_arcsec[j,i] = np.nan
+					source_y_fwhm_arcsec[j,i] = np.nan
+					source_theta_radians[j,i] = np.nan 
 
-			g_2d_cutout -= bkg 
+				cutout_shape = g_2d_cutout.shape
+
+				bkg = np.median(g_2d_cutout)
+				# bkg = np.mean(sigmaclip(g_2d_cutout,2,2)[0])
+
+				g_2d_cutout -= bkg 
+				
+				# recompute the meshgrid only if you get a non-square cutout
+				if g_2d_cutout.shape != (cutout_size, cutout_size):
+					xx3, yy3 = np.meshgrid(np.arange(cutout_shape[1]),np.arange(cutout_shape[0]))
+					xx = xx3
+					yy = yy3
+				else:
+					xx = xx2
+					yy = yy2 
+				
+				# intialize the model 
+				g_init.amplitude = g_2d_cutout[int(cutout_pos[1]), int(cutout_pos[0])]
+
+				# use the cutout position returned from generate_square_cutout to predict its location
+				g_init.x_mean = cutout_pos[0]
+				g_init.y_mean = cutout_pos[1]
+
+
+				g = fit_g(g_init,xx,yy,g_2d_cutout)
+				
+				if g.y_stddev.value > g.x_stddev.value:
+					x_stddev_save = g.x_stddev.value
+					y_stddev_save = g.y_stddev.value
+					g.x_stddev = y_stddev_save
+					g.y_stddev = x_stddev_save
+					g.theta += np.pi/2
+
+				source_x_fwhm_arcsec[j,i] = g.x_stddev.value * 2.35482 * PLATE_SCALE
+				source_y_fwhm_arcsec[j,i] = g.y_stddev.value * 2.35482 * PLATE_SCALE
+				source_theta_radians[j,i] = g.theta.value
+				#print(time.time()-t1)
+
+				# fig, ax = plt.subplots(1,2,figsize=(12,8),sharex=True,sharey=True)
+				# norm = ImageNormalize(g_2d_cutout-bkg,interval=ZScaleInterval())
+				# ax[0].imshow(g_2d_cutout-bkg,origin='lower',interpolation='none',norm=norm)
+				# ax[1].imshow(g(xx2,yy2),origin='lower',interpolation='none',norm=norm)
+				# plt.tight_layout()
+			logger.debug(f'FWHM loop time: {time.time()-tfwhm:.2f} s')
 			
-			# recompute the meshgrid only if you get a non-square cutout
-			if g_2d_cutout.shape != (cutout_size, cutout_size):
-				xx3, yy3 = np.meshgrid(np.arange(cutout_shape[1]),np.arange(cutout_shape[0]))
-				xx = xx3
-				yy = yy3
-			else:
-				xx = xx2
-				yy = yy2 
-			
-			# intialize the model 
-			g_init.amplitude = g_2d_cutout[int(cutout_pos[1]), int(cutout_pos[0])]
 
-			# use the cutout position returned from generate_square_cutout to predict its location
-			g_init.x_mean = cutout_pos[0]
-			g_init.y_mean = cutout_pos[1]
+	# write out the ancillary data as a parquet file
+	output_path = Path('/data/tierras/photometry/'+date+'/'+target+'/'+ffname+f'/{date}_{target}_ancillary_data.parquet')
 
+	names = ['Filename', 'JD UTC', 'BJD TDB', 'Exposure Time', 'Airmass', 'CCD Temp', 'Dome Temp', 'Focus', 'Dome Humid', 'Sec Temp', 'Ret Temp', 'Pri Temp', 'Rod Temp', 'Cab Temp', 'Inst Temp', 'Temp', 'Humid', 'Dewpoint', 'Sky Temp', 'Lunar Dist', 'Pressure', 'Ret Pressure', 'Supp Pressure', 'HA', 'Dome Az', 'Wind Spd', 'Wind Gust', 'Wind Dir','WCS Flag']
+	data = [filenames, np.round(jd_utc, 7), np.round(bjd_tdb, 7), np.round(exp_times, 2), np.round(airmasses, 2), np.round(ccd_temps, 1), np.round(dome_temps, 2), np.round(focuses, 1), np.round(dome_humidities, 2), np.round(sec_temps, 1),  np.round(ret_temps, 1), np.round(pri_temps, 1), np.round(rod_temps, 1), np.round(cab_temps, 1), np.round(inst_temps, 1), np.round(temps, 1), np.round(humidities, 1), np.round(dewpoints, 1), np.round(sky_temps, 1), np.round(lunar_distance, 2), np.round(pressures, 1), np.round(return_pressures, 0), np.round(supply_pressures, 0), np.round(hour_angles, 3), np.round(dome_azimuths, 1), np.round(wind_speeds, 2), np.round(wind_gusts, 2), np.round(wind_dirs, 0), wcs_flags]
+	tab = pa.Table.from_arrays(data, names)
+		
+	if not os.path.exists(output_path.parent.parent):
+		os.mkdir(output_path.parent.parent)
+		set_tierras_permissions(output_path.parent.parent)
+	if not os.path.exists(output_path.parent):
+		os.mkdir(output_path.parent)
+		set_tierras_permissions(output_path.parent)
+	pq.write_table(tab, output_path)
+	set_tierras_permissions(output_path)
 
-			g = fit_g(g_init,xx,yy,g_2d_cutout)
-			
-			if g.y_stddev.value > g.x_stddev.value:
-				x_stddev_save = g.x_stddev.value
-				y_stddev_save = g.y_stddev.value
-				g.x_stddev = y_stddev_save
-				g.y_stddev = x_stddev_save
-				g.theta += np.pi/2
-
-			source_x_fwhm_arcsec[j,i] = g.x_stddev.value * 2.35482 * PLATE_SCALE
-			source_y_fwhm_arcsec[j,i] = g.y_stddev.value * 2.35482 * PLATE_SCALE
-			source_theta_radians[j,i] = g.theta.value
-			#print(time.time()-t1)
-
-			# fig, ax = plt.subplots(1,2,figsize=(12,8),sharex=True,sharey=True)
-			# norm = ImageNormalize(g_2d_cutout-bkg,interval=ZScaleInterval())
-			# ax[0].imshow(g_2d_cutout-bkg,origin='lower',interpolation='none',norm=norm)
-			# ax[1].imshow(g(xx2,yy2),origin='lower',interpolation='none',norm=norm)
-			# plt.tight_layout()
-		logger.debug(f'FWHM loop time: {time.time()-tfwhm:.2f} s')
-		# logger.debug(f'Major FWHM (arcsec): {[f"{item:.2f}" for item in source_x_fwhm_arcsec[:,i]]}')
-		# logger.debug(f'Minor FWHM (arcsec): {[f"{item:.2f}" for item in source_y_fwhm_arcsec[:,i]]}')
-		# logger.debug(f'Theta (rad): {[f"{item:.2f}" for item in source_theta_radians[:,i]]}')
-
-			
-	#Write out photometry. 
+	
+	#Write out photometry as parquet files
 	for i in range(n_aps):
-		output_path = Path('/data/tierras/photometry/'+date+'/'+target+'/'+ffname+f'/{date}_{target}_circular_{type}_ap_phot_{ap_radii[i]}.csv')
-		
-		output_list = []
-		output_header = []
-		
-		output_list.append([f'{val}' for val in filenames])
-		output_header.append('Filename')
-
-		output_list.append([f'{val:.7f}' for val in mjd_utc])
-		output_header.append('MJD UTC')
-		output_list.append([f'{val:.7f}' for val in jd_utc])
-		output_header.append('JD UTC')
-		output_list.append([f'{val:.7f}' for val in bjd_tdb])
-		output_header.append('BJD TDB')
-
-		output_list.append([f'{val:.2f}' for val in source_radii[i]])
-		output_header.append('Aperture Radius')
-		output_list.append([f'{val:.2f}' for val in an_in_radii[i]])
-		output_header.append('Inner Annulus Radius')
-		output_list.append([f'{val:.2f}' for val in an_out_radii[i]])
-		output_header.append('Outer Annulus Radius')
-
-		output_list.append([f'{val:.2f}' for val in exp_times])
-		output_header.append('Exposure Time')
-		output_list.append([f'{val:.4f}' for val in airmasses])
-		output_header.append('Airmass')
-		output_list.append([f'{val:.1f}' for val in ccd_temps])
-		output_header.append('CCD Temperature')
-		output_list.append([f'{val:.2f}' for val in dome_temps])
-		output_header.append('Dome Temperature')
-		output_list.append([f'{val:.1f}' for val in focuses])
-		output_header.append('Focus')
-		output_list.append([f'{val:.2f}' for val in dome_humidities])
-		output_header.append('Dome Humidity')
-		output_list.append([f'{val:.1f}' for val in sec_temps])
-		output_header.append('Sec Temperature')
-		output_list.append([f'{val:.1f}' for val in ret_temps])
-		output_header.append('Ret Temperature')
-		output_list.append([f'{val:.1f}' for val in pri_temps])
-		output_header.append('Pri Temperature')
-		output_list.append([f'{val:.1f}' for val in rod_temps])
-		output_header.append('Rod Temperature')
-		output_list.append([f'{val:.2f}' for val in cab_temps])
-		output_header.append('Cab Temperature')
-		output_list.append([f'{val:.1f}' for val in inst_temps])
-		output_header.append('Instrument Temperature')
-		output_list.append([f'{val:.1f}' for val in temps])
-		output_header.append('Temperature')
-		output_list.append([f'{val:.1f}' for val in humidities])
-		output_header.append('Humidity')
-		output_list.append([f'{val:.2f}' for val in dewpoints])
-		output_header.append('Dewpoint')
-		output_list.append([f'{val:.1f}' for val in sky_temps])
-		output_header.append('Sky Temperature')
-		output_list.append([f'{val:.5f}' for val in lunar_distance])
-		output_header.append('Lunar Distance')
-		output_list.append([f'{val:.1f}' for val in pressures])
-		output_header.append('Pressure')
-		output_list.append([f'{val:.1f}' for val in return_pressures])
-		output_header.append('Return Pressure')
-		output_list.append([f'{val:.1f}' for val in supply_pressures])
-		output_header.append('Supply Pressure')
-		output_list.append([f'{val:.2f}' for val in hour_angles])
-		output_header.append('Hour Angle')
-		output_list.append([f'{val:.2f}' for val in dome_azimuths])
-		output_header.append('Dome Azimuth')
-		output_list.append([f'{val:.2f}' for val in wind_speeds])
-		output_header.append('Wind Speed')
-		output_list.append([f'{val:.2f}' for val in wind_gusts])
-		output_header.append('Wind Gust')
-		output_list.append([f'{val:.1f}' for val in wind_dirs])
-		output_header.append('Wind Direction')
-		output_list.append([f'{val:d}' for val in wcs_flags])
-		output_header.append('WCS Flag')
-
+		output_path = Path('/data/tierras/photometry/'+date+'/'+target+'/'+ffname+f'/{date}_{target}_circular_{phot_type}_ap_phot_{ap_radii[i]}.parquet')
+		names = ['Aperture Radius', 'Inner Annulus Radius', 'Outer Annulus Radius']
+		data = [np.round(source_radii[i], 1), np.round(an_in_radii[i], 1), np.round(an_out_radii[i], 1)]
 		for j in range(n_sources):
 			source_name = f'S{j}'
-			output_list.append([f'{val:.4f}' for val in source_x[j]])
-			output_header.append(source_name+' X')
-			output_list.append([f'{val:.4f}' for val in source_y[j]])
-			output_header.append(source_name+' Y')
-			output_list.append([f'{val:.7f}' for val in source_minus_sky_ADU[i,j]])
-			output_header.append(source_name+' Source-Sky ADU')
-			output_list.append([f'{val:.7f}' for val in source_minus_sky_err_ADU[i,j]])
-			output_header.append(source_name+' Source-Sky Error ADU')
-			output_list.append([f'{val:.7f}' for val in source_sky_ADU[j]])
-			output_header.append(source_name+' Sky ADU')
-			output_list.append([f'{val:.4f}' for val in source_x_fwhm_arcsec[j]])
-			output_header.append(source_name+' X FWHM Arcsec')
-			output_list.append([f'{val:.4f}' for val in source_y_fwhm_arcsec[j]])
-			output_header.append(source_name+' Y FWHM Arcsec')
-			output_list.append([f'{val:.4f}' for val in source_theta_radians[j]])
-			output_header.append(source_name+' Theta Radians')
+			names.extend([source_name+' X', source_name+' Y', source_name+' Source-Sky', source_name+' Source-Sky Err', source_name+' Sky', source_name+' X FWHM', source_name+' Y FWHM', source_name+' Theta', source_name+' NL Flag', source_name+' Sat Flag', source_name+' Interp Flag'])
+			data.extend([np.round(source_x[j], 2), np.round(source_y[j], 2), np.round(source_minus_sky_ADU[i,j],4), np.round(source_minus_sky_err_ADU[i,j],4), np.round(source_sky_ADU[j],2), np.round(source_x_fwhm_arcsec[j], 1), np.round(source_y_fwhm_arcsec[j],1), np.round(source_theta_radians[j], 1), non_linear_flags[i,j], saturated_flags[i,j], interpolation_flags[i,j]])
 
-			output_list.append([f'{val:d}' for val in non_linear_flags[i,j]])
-			output_header.append(source_name+' Non-Linear Flag')
-			output_list.append([f'{val:d}' for val in saturated_flags[i,j]])
-			output_header.append(source_name+' Saturated Flag')
-			output_list.append([f'{val:d}' for val in interpolation_flags[i,j]])
-			output_header.append(source_name+' Interpolation Flag')
-
-		output_df = pd.DataFrame(np.transpose(output_list),columns=output_header)
+		tab = pa.Table.from_arrays(data, names)
+		
 		if not os.path.exists(output_path.parent.parent):
 			os.mkdir(output_path.parent.parent)
 			set_tierras_permissions(output_path.parent.parent)
 		if not os.path.exists(output_path.parent):
 			os.mkdir(output_path.parent)
 			set_tierras_permissions(output_path.parent)
-		output_df.to_csv(output_path,index=False)
+		pq.write_table(tab, output_path)
 		set_tierras_permissions(output_path)
 
 	plt.close('all')
@@ -2611,6 +2604,7 @@ def make_data_dirs(date, target, ffname):
 	global fpath, lcpath
 	lcpath = '/data/tierras/lightcurves'
 	photpath = '/data/tierras/photometry'
+	fieldpath = '/data/tierras/fields'
 
 	if not os.path.exists(lcpath+f'/{date}'):
 		os.mkdir(lcpath+f'/{date}')
@@ -2631,6 +2625,10 @@ def make_data_dirs(date, target, ffname):
 	if not os.path.exists(photpath+f'/{date}/{target}/{ffname}'):
 		os.mkdir(photpath+f'/{date}/{target}/{ffname}')
 		set_tierras_permissions(photpath+f'/{date}/{target}/{ffname}')
+
+	if not os.path.exists(fieldpath+f'/{target}'):
+		os.mkdir(fieldpath+f'/{target}')
+		set_tierras_permissions(fieldpath+f'/{target}')
 	return 
 
 def main(raw_args=None):
@@ -2644,7 +2642,9 @@ def main(raw_args=None):
 	ap.add_argument("-an_out", required=False, default=55, help='Outer background annulus radius in pixels.', type=float)
 	ap.add_argument("-edge_limit",required=False,default=20,help="Minimum separation a source has from the detector edge to be considered as a reference star.",type=float)
 	ap.add_argument("-centroid",required=False,default=False,help="Whether or not to centroid during aperture photometry.",type=str)
-	ap.add_argument("-centroid_type",required=False,default='centroid_2dg',help="Photutils centroid function. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.",type=str)
+	ap.add_argument("-centroid_type",required=False,default='centroid_1dg',help="Photutils centroid function. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.",type=str)
+	ap.add_argument("-interpolate_cosmics",required=False,default=False,help="Whether or not to identify and interpolate cosmic ray hits (not working at present!)")
+	ap.add_argument("-measure_fwhm", required=False, default=False, help="Whether or not to measure FWHM in the images. Time consuming!")
 	args = ap.parse_args(raw_args)
 
 	#Access observation info
@@ -2658,6 +2658,8 @@ def main(raw_args=None):
 	an_out = args.an_out 
 	edge_limit = args.edge_limit
 	centroid = t_or_f(args.centroid)
+	interpolate_cosmics = t_or_f(args.interpolate_cosmics)
+	measure_fwhm = t_or_f(args.measure_fwhm)
 	centroid_type = args.centroid_type
 
 	# set up the directories for storing photometry data 
@@ -2694,21 +2696,10 @@ def main(raw_args=None):
 	flattened_files = get_flattened_files(date, target, ffname)
 
 	# identify sources in the field 
-	sources = source_selection(flattened_files, logger, edge_limit=edge_limit)
+	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=True, overwrite=True)
 
-	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=True)
-
-	#Determine the optimal aperture size
-	# optimal_lc_path = lc_post_processing(date, target, ffname, overwrite=True)
-	# optimal_lc_path = optimal_lc_chooser(date, target, ffname, plot=False,start_time=0, stop_time=0)
-	# print(f'Optimal light curve: {optimal_lc_path}')
-	
-	#Use the optimal aperture to plot the target light curve
-	# plot_target_summary(optimal_lc_path)
-	# plot_target_lightcurve(optimal_lc_path)
-	# plot_ref_lightcurves(optimal_lc_path)
-	# plot_raw_fluxes(optimal_lc_path)
-
+	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False, measure_fwhm=measure_fwhm)
+		
 if __name__ == '__main__':
 	main()
 	
