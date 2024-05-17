@@ -56,9 +56,10 @@ import pickle
 import shutil
 import warnings
 from etc_pat import etc 
-from astropy.modeling.functional_models import Gaussian2D
+from astropy.modeling.functional_models import Gaussian2D, Gaussian1D
 import pyarrow as pa 
 import pyarrow.parquet as pq 
+# from fwhm import *
 
 # Suppress all Astropy warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="astropy")
@@ -636,7 +637,7 @@ def generate_square_cutout(image, position, size):
 
 	return cutout, position_in_cutout
 
-def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35, an_out=55, phot_type='fixed', centroid=False, centroid_type='centroid_2dg', interpolate_cosmics=False, measure_fwhm=False):
+def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35, an_out=55, phot_type='fixed', centroid=False, centroid_type='centroid_2dg', interpolate_cosmics=False):
 	"""
 	Does circular aperture photometry on sources in a list of reduced Tierras images for an array of aperture sizes. Writes out photometry csv files to /data/tierras/lightcurves/date/target/ffname/.
 
@@ -1009,74 +1010,117 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 						breakpoint()
 			logger.debug(f'Cosmic interpolation time: {time.time()-tcosmic:.2f} s')
 
-		if measure_fwhm:						
-			tfwhm = time.time()
-			#Measure FWHM 
-			k = 0
-			cutout_size = 30
-			g_init = models.Gaussian2D(amplitude=1,x_mean=cutout_size/2,y_mean=cutout_size/2, x_stddev=3, y_stddev=3)
-			g_init.theta.bounds = (0, np.pi)
-			g_init.x_stddev.bounds = (1,10)
-			g_init.y_stddev.bounds = (1,10)
+		# if measure_fwhm: 
+		# 	tfwhm = time.time()
+		# 	k = 0 
+		# 	slice_size = 30
+		# 	# cutout_size = 30
+		# 	bkg = np.nanmedian(source_data)
 
-			# pre-compute meshgrid of pixel indices for square cutouts (which will be the case for all sources except those near the edges)
-			xx2, yy2 = np.meshgrid(np.arange(cutout_size),np.arange(cutout_size))
+		# 	# TODO: this loop appears to slow down over time, WHY!?
+		# 	# this is, in general, the slowest loop of the program. How can we make it faster??
+		# 	for j in range(len(source_positions)):
+		# 		# try:
+		# 		# 	g_2d_cutout, cutout_pos = generate_square_cutout(source_data, source_positions[j], cutout_size)
+		# 		# except:
+		# 		# 	source_x_fwhm_arcsec[j,i] = np.nan
+		# 		# 	source_y_fwhm_arcsec[j,i] = np.nan
+		# 		# 	source_theta_radians[j,i] = np.nan 
 
-			# TODO: this loop appears to slow down over time, WHY!?
-			# this is, in general, the slowest loop of the program. How can we make it faster??
-			for j in range(len(source_positions)):
-				try:
-					g_2d_cutout, cutout_pos = generate_square_cutout(source_data, source_positions[j], cutout_size)
-				except:
-					source_x_fwhm_arcsec[j,i] = np.nan
-					source_y_fwhm_arcsec[j,i] = np.nan
-					source_theta_radians[j,i] = np.nan 
+		# 		# cutout_shape = g_2d_cutout.shape
 
-				cutout_shape = g_2d_cutout.shape
+		# 		# bkg = np.median(g_2d_cutout)
+		# 		# # bkg = np.mean(sigmaclip(g_2d_cutout,2,2)[0])
 
-				bkg = np.median(g_2d_cutout)
-				# bkg = np.mean(sigmaclip(g_2d_cutout,2,2)[0])
+		# 		# g_2d_cutout -= bkg 
 
-				g_2d_cutout -= bkg 
+		# 		x_slice = source_data[int(source_y[j,i]),int(source_x[j,i]-int(slice_size/2)):int(source_x[j,i]+int(slice_size/2))]-bkg
+		# 		y_slice = source_data[int(source_y[j,i]-int(slice_size/2)):int(source_y[j,i]+int(slice_size/2)),int(source_x[j,i])]-bkg
+
+		# 		try:
+		# 			coeff, var_matrix = curve_fit(gauss, np.arange(slice_size), x_slice, p0=[np.nanmax(x_slice), slice_size/2, 3]) 
+		# 			source_x_fwhm_arcsec[j,i] = coeff[-1] * 2.35482 * PLATE_SCALE	
+		# 		except:
+		# 			source_x_fwhm_arcsec[j,i] = np.nan
+
+		# 		try:
+		# 			coeff, var_matrix = curve_fit(gauss, np.arange(slice_size), y_slice, p0=[np.nanmax(y_slice), slice_size/2, 3])
+		# 			source_y_fwhm_arcsec[j,i] = coeff[-1] * 2.35482 * PLATE_SCALE
+		# 		except:
+		# 			source_y_fwhm_arcsec[j,i] = np.nan
 				
-				# recompute the meshgrid only if you get a non-square cutout
-				if g_2d_cutout.shape != (cutout_size, cutout_size):
-					xx3, yy3 = np.meshgrid(np.arange(cutout_shape[1]),np.arange(cutout_shape[0]))
-					xx = xx3
-					yy = yy3
-				else:
-					xx = xx2
-					yy = yy2 
+		# 	logger.debug(f'FWHM loop time: {time.time()-tfwhm:.2f} s')
+		# 	breakpoint()
+
+		# this method does 2D Gaussian fitting which is SLOOOOOOOW
+		# if measure_fwhm:						
+		# 	tfwhm = time.time()
+		# 	#Measure FWHM 
+		# 	k = 0
+		# 	cutout_size = 30
+		# 	g_init = models.Gaussian2D(amplitude=1,x_mean=cutout_size/2,y_mean=cutout_size/2, x_stddev=3, y_stddev=3)
+		# 	g_init.theta.bounds = (0, np.pi)
+		# 	g_init.x_stddev.bounds = (1,10)
+		# 	g_init.y_stddev.bounds = (1,10)
+
+		# 	# pre-compute meshgrid of pixel indices for square cutouts (which will be the case for all sources except those near the edges)
+		# 	xx2, yy2 = np.meshgrid(np.arange(cutout_size),np.arange(cutout_size))
+
+		# 	# TODO: this loop appears to slow down over time, WHY!?
+		# 	# this is, in general, the slowest loop of the program. How can we make it faster??
+		# 	for j in range(len(source_positions)):
+		# 		try:
+		# 			g_2d_cutout, cutout_pos = generate_square_cutout(source_data, source_positions[j], cutout_size)
+		# 		except:
+		# 			source_x_fwhm_arcsec[j,i] = np.nan
+		# 			source_y_fwhm_arcsec[j,i] = np.nan
+		# 			source_theta_radians[j,i] = np.nan 
+
+		# 		cutout_shape = g_2d_cutout.shape
+
+		# 		bkg = np.median(g_2d_cutout)
+		# 		# bkg = np.mean(sigmaclip(g_2d_cutout,2,2)[0])
+
+		# 		g_2d_cutout -= bkg 
 				
-				# intialize the model 
-				g_init.amplitude = g_2d_cutout[int(cutout_pos[1]), int(cutout_pos[0])]
-
-				# use the cutout position returned from generate_square_cutout to predict its location
-				g_init.x_mean = cutout_pos[0]
-				g_init.y_mean = cutout_pos[1]
-
-
-				g = fit_g(g_init,xx,yy,g_2d_cutout)
+		# 		# recompute the meshgrid only if you get a non-square cutout
+		# 		if g_2d_cutout.shape != (cutout_size, cutout_size):
+		# 			xx3, yy3 = np.meshgrid(np.arange(cutout_shape[1]),np.arange(cutout_shape[0]))
+		# 			xx = xx3
+		# 			yy = yy3
+		# 		else:
+		# 			xx = xx2
+		# 			yy = yy2 
 				
-				if g.y_stddev.value > g.x_stddev.value:
-					x_stddev_save = g.x_stddev.value
-					y_stddev_save = g.y_stddev.value
-					g.x_stddev = y_stddev_save
-					g.y_stddev = x_stddev_save
-					g.theta += np.pi/2
+		# 		# intialize the model 
+		# 		g_init.amplitude = g_2d_cutout[int(cutout_pos[1]), int(cutout_pos[0])]
 
-				source_x_fwhm_arcsec[j,i] = g.x_stddev.value * 2.35482 * PLATE_SCALE
-				source_y_fwhm_arcsec[j,i] = g.y_stddev.value * 2.35482 * PLATE_SCALE
-				source_theta_radians[j,i] = g.theta.value
-				#print(time.time()-t1)
+		# 		# use the cutout position returned from generate_square_cutout to predict its location
+		# 		g_init.x_mean = cutout_pos[0]
+		# 		g_init.y_mean = cutout_pos[1]
 
-				# fig, ax = plt.subplots(1,2,figsize=(12,8),sharex=True,sharey=True)
-				# norm = ImageNormalize(g_2d_cutout-bkg,interval=ZScaleInterval())
-				# ax[0].imshow(g_2d_cutout-bkg,origin='lower',interpolation='none',norm=norm)
-				# ax[1].imshow(g(xx2,yy2),origin='lower',interpolation='none',norm=norm)
-				# plt.tight_layout()
-			logger.debug(f'FWHM loop time: {time.time()-tfwhm:.2f} s')
-			
+
+		# 		g = fit_g(g_init,xx,yy,g_2d_cutout)
+				
+		# 		if g.y_stddev.value > g.x_stddev.value:
+		# 			x_stddev_save = g.x_stddev.value
+		# 			y_stddev_save = g.y_stddev.value
+		# 			g.x_stddev = y_stddev_save
+		# 			g.y_stddev = x_stddev_save
+		# 			g.theta += np.pi/2
+
+		# 		source_x_fwhm_arcsec[j,i] = g.x_stddev.value * 2.35482 * PLATE_SCALE
+		# 		source_y_fwhm_arcsec[j,i] = g.y_stddev.value * 2.35482 * PLATE_SCALE
+		# 		source_theta_radians[j,i] = g.theta.value
+		# 		#print(time.time()-t1)
+
+		# 		# fig, ax = plt.subplots(1,2,figsize=(12,8),sharex=True,sharey=True)
+		# 		# norm = ImageNormalize(g_2d_cutout-bkg,interval=ZScaleInterval())
+		# 		# ax[0].imshow(g_2d_cutout-bkg,origin='lower',interpolation='none',norm=norm)
+		# 		# ax[1].imshow(g(xx2,yy2),origin='lower',interpolation='none',norm=norm)
+		# 		# plt.tight_layout()
+		# 	logger.debug(f'FWHM loop time: {time.time()-tfwhm:.2f} s')
+		# 	breakpoint()	
 
 	# write out the ancillary data as a parquet file
 	output_path = Path('/data/tierras/photometry/'+date+'/'+target+'/'+ffname+f'/{date}_{target}_ancillary_data.parquet')
@@ -2631,6 +2675,145 @@ def make_data_dirs(date, target, ffname):
 		set_tierras_permissions(fieldpath+f'/{target}')
 	return 
 
+def measure_fwhm_grid(date, field, ffname, sources, box_size=512):
+
+	files = get_flattened_files(date, field, ffname)
+	PLATE_SCALE = 0.432
+	fit_g = fitting.LevMarLSQFitter() # fitter object for fitting 2D gaussians to measure FWHM
+
+	# establish grid across the image in which to select sources for fwhm measurement 
+	im_shape = fits.open(files[0])[0].data.shape
+	box_x_starts = np.arange(0, im_shape[1], box_size)
+	box_y_starts = np.arange(0, im_shape[0], box_size)
+
+	source_x = np.array(sources['X pix'])
+	source_y = np.array(sources['Y pix'])
+	fwhm_star_ids = [] 
+	print(f'Identifying grid of FWHM stars with a box size of {box_size}...')
+	for i in range(len(box_x_starts)):
+		x_start = box_x_starts[i]
+		x_end = x_start + box_size
+		for j in range(len(box_y_starts)):
+			y_start = box_y_starts[j]
+			y_end = y_start + box_size
+			
+			sources_in_box = sources.iloc[np.where((source_x >= x_start) & (source_x <= x_end) & (source_y >= y_start) & (source_y <= y_end))[0]]
+			sources_in_box_x = np.array(sources_in_box['X pix'])
+			sources_in_box_y = np.array(sources_in_box['Y pix'])	
+			sources_to_keep = []
+			for k in range(len(sources_in_box)):
+				dists = np.sqrt((sources_in_box_x[k]-sources_in_box_x)**2 + (sources_in_box_y[k]-sources_in_box_y)**2)
+				if (len(np.where((dists < 20) & (dists != 0))[0]) == 0) and(np.array(sources_in_box['phot_rp_mean_mag'])[k] > 11):
+					sources_to_keep.append(k)
+			sources_in_box = sources_in_box.iloc[sources_to_keep]
+			# take the brightest star in the box as the FWHM source 
+			# TODO: worry about saturated sources
+			if len(sources_in_box) != 0:
+				fwhm_star_ids.append(sources_in_box.index[0])
+	
+	fwhm_stars = sources.iloc[fwhm_star_ids]
+	# fig, ax = plot_image(fits.open(files[0])[0].data)
+	# ax.plot(fwhm_stars['X pix'], fwhm_stars['Y pix'], 'rx')	
+
+	source_x_fwhm_arcsec = np.zeros((len(fwhm_stars), len(files)))
+	source_y_fwhm_arcsec = np.zeros_like(source_x_fwhm_arcsec)
+	source_theta_radians = np.zeros_like(source_x_fwhm_arcsec)
+	print(f'Identified {len(fwhm_stars)} FWHM sources.')
+	for i in range(len(files)):
+		print(f'Measuring FWHM in {files[i].name} ({i+1} of {len(files)}).')
+		data = fits.open(files[i])[0].data
+
+		tfwhm = time.time()
+		#Measure FWHM 
+		k = 0
+		cutout_size = 30
+		g_init = models.Gaussian2D(amplitude=1,x_mean=cutout_size/2,y_mean=cutout_size/2, x_stddev=3, y_stddev=3)
+		g_init.theta.bounds = (0, np.pi)
+		g_init.x_stddev.bounds = (1,10)
+		g_init.y_stddev.bounds = (1,10)
+
+		# pre-compute meshgrid of pixel indices for square cutouts (which will be the case for all sources except those near the edges)
+		xx2, yy2 = np.meshgrid(np.arange(cutout_size),np.arange(cutout_size))
+
+		
+		for j in range(len(fwhm_stars)):
+			
+			# TODO: this loop appears to slow down over time, WHY!?
+			# this is, in general, the slowest loop of the program. How can we make it faster??
+			try:
+				g_2d_cutout, cutout_pos = generate_square_cutout(data, (np.array(fwhm_stars['X pix'])[j], np.array(fwhm_stars['Y pix'])[j]), cutout_size)
+			except:
+				source_x_fwhm_arcsec[j,i] = np.nan
+				source_y_fwhm_arcsec[j,i] = np.nan
+				source_theta_radians[j,i] = np.nan 
+
+			cutout_shape = g_2d_cutout.shape
+
+			bkg = np.median(g_2d_cutout)
+			# bkg = np.mean(sigmaclip(g_2d_cutout,2,2)[0])
+
+			g_2d_cutout -= bkg 
+			
+			# recompute the meshgrid only if you get a non-square cutout
+			if g_2d_cutout.shape != (cutout_size, cutout_size):
+				xx3, yy3 = np.meshgrid(np.arange(cutout_shape[1]),np.arange(cutout_shape[0]))
+				xx = xx3
+				yy = yy3
+			else:
+				xx = xx2
+				yy = yy2 
+			
+			# intialize the model 
+			g_init.amplitude = g_2d_cutout[int(cutout_pos[1]), int(cutout_pos[0])]
+
+			# use the cutout position returned from generate_square_cutout to predict its location
+			g_init.x_mean = cutout_pos[0]
+			g_init.y_mean = cutout_pos[1]
+
+
+			g = fit_g(g_init,xx,yy,g_2d_cutout)
+			
+			if g.y_stddev.value > g.x_stddev.value:
+				x_stddev_save = g.x_stddev.value
+				y_stddev_save = g.y_stddev.value
+				g.x_stddev = y_stddev_save
+				g.y_stddev = x_stddev_save
+				g.theta += np.pi/2
+
+			source_x_fwhm_arcsec[j,i] = g.x_stddev.value * 2.35482 * PLATE_SCALE
+			source_y_fwhm_arcsec[j,i] = g.y_stddev.value * 2.35482 * PLATE_SCALE
+			source_theta_radians[j,i] = g.theta.value
+			#print(time.time()-t1)
+	fwhm_x = np.nanmedian(source_x_fwhm_arcsec, axis=0)
+	fwhm_y = np.nanmedian(source_y_fwhm_arcsec, axis=0)
+	theta = np.nanmedian(source_theta_radians, axis=0)
+
+	# write out measurements to ancillary file 
+	ancillary_path = f'/data/tierras/photometry/{date}/{field}/{ffname}/{date}_{field}_ancillary_data.parquet'
+	if os.path.exists(ancillary_path):
+		ancillary_tab = pq.read_table(ancillary_path)
+		# if columns already present, remove so they can be updated
+		if 'FWHM X' in ancillary_tab.column_names:
+			column_ind = np.where(np.array(ancillary_tab.column_names) == 'FWHM X')[0][0]
+			ancillary_tab = ancillary_tab.remove_column(column_ind)
+		if 'FWHM Y' in ancillary_tab.column_names:
+			column_ind = np.where(np.array(ancillary_tab.column_names) == 'FWHM Y')[0][0]
+			ancillary_tab = ancillary_tab.remove_column(column_ind)
+		if 'Theta' in ancillary_tab.column_names:
+			column_ind = np.where(np.array(ancillary_tab.column_names) == 'Theta')[0][0]
+			ancillary_tab = ancillary_tab.remove_column(column_ind)	
+		# append new measurements
+		ancillary_tab = ancillary_tab.append_column('FWHM X', [np.round(fwhm_x,2)])
+		ancillary_tab = ancillary_tab.append_column('FWHM Y', [np.round(fwhm_y,2)])
+		ancillary_tab = ancillary_tab.append_column('Theta', [np.round(theta,2)])
+		pq.write_table(ancillary_tab, ancillary_path)
+		set_tierras_permissions(ancillary_path)
+	else:
+		print(f'No ancillary data file exists for {field} on {date}! Run circular_aperture_photometry first.')
+	return 	
+
+
+
 def main(raw_args=None):
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-date", required=True, help="Date of observation in YYYYMMDD format.")
@@ -2644,7 +2827,6 @@ def main(raw_args=None):
 	ap.add_argument("-centroid",required=False,default=False,help="Whether or not to centroid during aperture photometry.",type=str)
 	ap.add_argument("-centroid_type",required=False,default='centroid_1dg',help="Photutils centroid function. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.",type=str)
 	ap.add_argument("-interpolate_cosmics",required=False,default=False,help="Whether or not to identify and interpolate cosmic ray hits (not working at present!)")
-	ap.add_argument("-measure_fwhm", required=False, default=False, help="Whether or not to measure FWHM in the images. Time consuming!")
 	args = ap.parse_args(raw_args)
 
 	#Access observation info
@@ -2659,7 +2841,6 @@ def main(raw_args=None):
 	edge_limit = args.edge_limit
 	centroid = t_or_f(args.centroid)
 	interpolate_cosmics = t_or_f(args.interpolate_cosmics)
-	measure_fwhm = t_or_f(args.measure_fwhm)
 	centroid_type = args.centroid_type
 
 	# set up the directories for storing photometry data 
@@ -2698,7 +2879,11 @@ def main(raw_args=None):
 	# identify sources in the field 
 	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=True, overwrite=True)
 
-	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False, measure_fwhm=measure_fwhm)
+	# do photometry 
+	# circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False)
+
+	# measure fwhm on grid of stars spread across the images
+	measure_fwhm_grid(date, target, ffname, sources)
 		
 if __name__ == '__main__':
 	main()
