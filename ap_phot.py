@@ -822,49 +822,85 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 			ha_decimal = int(ha_str.split(':')[0]) + int(ha_str.split(':')[1])/60 + float(ha_str.split(':')[2])/3600
 		hour_angles[i] = ha_decimal
 
-		#These keywords are sometimes missing
+		#These keywords are sometimes missing, do each in a try/expect clause
 		try:
 			dome_humidities[i] = source_header['DOMEHUMI']
+		except:
+			dome_humidities[i] = np.nan 
+		try:
 			dome_temps[i] = source_header['DOMETEMP']
+		except:
+			dome_temps[i] = np.nan 
+		try:
 			sec_temps[i] = source_header['SECTEMP']
+		except:
+			sec_temps[i] = np.nan 
+		try:
 			rod_temps[i] = source_header['RODTEMP']
+		except:
+			rod_temps[i] = np.nan
+		try:
 			cab_temps[i] = source_header['CABTEMP']
+		except:
+			cab_temps[i] = np.nan 
+		try:
 			inst_temps[i] = source_header['INSTTEMP']
+		except:
+			inst_temps[i] = np.nan
+		try:
 			ret_temps[i] = source_header['RETTEMP']
+		except:
+			ret_temps[i] = np.nan
+		try:
 			pri_temps[i] = source_header['PRITEMP']
+		except:
+			pri_temps[i] = np.nan 
+		try:
 			dewpoints[i] = source_header['DEWPOINT']
+		except:
+			dewpoints[i] = np.nan
+		try:
 			temps[i] = source_header['TEMPERAT']
+		except:
+			temps[i] = np.nan
+		try:
 			humidities[i] = source_header['HUMIDITY']
+		except:
+			humidities[i] = np.nan 
+		try:
 			sky_temps[i] = source_header['SKYTEMP']
+		except:
+			sky_temps[i] = np.nan
+		try:
 			pressures[i] = source_header['PRESSURE']
+		except:
+			pressures[i] = np.nan
+		try:
 			return_pressures[i] = source_header['PSPRES1']
+		except: 
+			return_pressures[i] = np.nan 
+		try:
 			supply_pressures[i] = source_header['PSPRES2']
+		except:
+			supply_pressures[i] = np.nan 
+		try:
 			dome_azimuths[i] = source_header['DOMEAZ']
+		except:
+			dome_azimuths[i] = np.nan 
+		try:
 			wind_speeds[i] = source_header['WINDSPD']
+		except:
+			wind_speeds[i] = np.nan 
+		try:
 			wind_gusts[i] = source_header['WINDGUST']
+		except:
+			wind_gusts[i] = np.nan 
+		try:
 			wind_dirs[i] = source_header['WINDDIR']
 		except:
-			dome_humidities[i] = np.nan
-			dome_temps[i] = np.nan
-			sec_temps[i] = np.nan
-			rod_temps[i] = np.nan
-			cab_temps[i] = np.nan
-			inst_temps[i] = np.nan
-			ret_temps[i] = np.nan
-			pri_temps[i] = np.nan
-			dewpoints[i] = np.nan
-			temps[i] = np.nan
-			humidities[i] = np.nan
-			sky_temps[i] = np.nan
-			pressures[i] = np.nan
-			return_pressures[i] = np.nan
-			supply_pressures[i] = np.nan
-			dome_azimuths[i] = np.nan
-			wind_speeds[i] = np.nan
-			wind_gusts[i] = np.nan
-			wind_dirs[i] = np.nan
+			wind_dirs[i] = np.nan 
 
-		lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary	
+		# lunar_distance[i] = get_lunar_distance(RA, DEC, bjd_tdb[i]) #Commented out because this is slow and the information can be generated at a later point if necessary	
 
 		if interpolate_cosmics:
 			data_copy = copy.deepcopy(source_data)
@@ -2880,7 +2916,7 @@ def main(raw_args=None):
 	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=True, overwrite=True)
 
 	# do photometry 
-	# circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False)
+	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False)
 
 	# measure fwhm on grid of stars spread across the images
 	measure_fwhm_grid(date, target, ffname, sources)
