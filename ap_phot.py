@@ -152,7 +152,7 @@ def plot_image(data,use_wcs=False,cmap_name='viridis'):
 	plt.tight_layout()
 	return fig, ax
 
-def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01):	
+def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01, rp_mag_limit=17):	
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
 		INPUTS: 
@@ -225,8 +225,8 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	# to be safe, set the width/height to be a bit larger than the estimates from plate scale alone, and cut to sources that actually fall on the chip after the query is complete
 	#	after the query is complete
 	coord = SkyCoord(avg_central_ra*u.deg, avg_central_dec*u.deg)
-	width = u.Quantity(plate_scale*im_shape[0],u.arcsec)*1.5
-	height = u.Quantity(plate_scale*im_shape[1],u.arcsec)*1.5
+	width = u.Quantity(plate_scale*im_shape[0],u.arcsec)/np.cos(np.radians(avg_central_dec))
+	height = u.Quantity(plate_scale*im_shape[1],u.arcsec)
 
 	# use the exposure time calculator to get an estimate for the rp magnitude limit that will give the desired minimum SNR 
 	# this assumes that all the images are taken at the same exposure time
@@ -238,18 +238,17 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	# mag_limit = rp_mags[np.argmin(abs(snrs-min_snr))]
 	# logger.debug(f'Using a Gaia Rp mag limit of {mag_limit:.1f} to get sources with a minimum SNR of {min_snr}')	
 
-	mag_limit = 16
-	logger.debug(f'Using a Gaia RP mag limit of {mag_limit:.1f}.')
+	logger.debug(f'Using a Gaia RP mag limit of {rp_mag_limit:.1f}.')
 
 	# query Gaia DR3 for all the sources in the field brighter than the calculated magnitude limit
 	job = Gaia.launch_job_async("""
-									SELECT source_id, ra, ra_error, dec, dec_error, ref_epoch, pmra, pmra_error, pmdec, pmdec_error, parallax, parallax_error, parallax_over_error, ruwe, phot_bp_mean_mag, phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_flux, phot_bp_mean_flux_error, phot_g_mean_flux, phot_g_mean_flux_error, phot_rp_mean_flux, phot_rp_mean_flux_error, bp_rp, bp_g, g_rp, phot_variable_flag,radial_velocity, radial_velocity_error, non_single_star, teff_gspphot, logg_gspphot, mh_gspphot
+									SELECT source_id, ra, ra_error, dec, dec_error, ref_epoch, pmra, pmra_error, pmdec, pmdec_error, parallax, parallax_error, parallax_over_error, ruwe, phot_bp_mean_mag, phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_flux, phot_bp_mean_flux_error, phot_g_mean_flux, phot_g_mean_flux_error, phot_rp_mean_flux, phot_rp_mean_flux_error, bp_rp, bp_g, g_rp, grvs_mag, grvs_mag_error, phot_variable_flag,radial_velocity, radial_velocity_error, non_single_star, teff_gspphot, logg_gspphot, mh_gspphot, rvs_spec_sig_to_noise
 							 		FROM gaiadr3.gaia_source as gaia
 									WHERE gaia.ra BETWEEN {} AND {} AND
 											gaia.dec BETWEEN {} AND {} AND
 							 				gaia.phot_rp_mean_mag <= {}
 									ORDER BY phot_rp_mean_mag ASC
-								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, mag_limit)
+								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, rp_mag_limit)
 								)
 	res = job.get_results()
 	res['SOURCE_ID'].name = 'source_id' # why does this get returned in all caps? 
@@ -270,7 +269,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 									) AS edr3
 									JOIN external.gaiaedr3_distance using(source_id)
 									ORDER BY phot_rp_mean_mag ASC
-								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, mag_limit)
+								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, rp_mag_limit)
 								)
 	res2 = job.get_results()	
 	
@@ -286,7 +285,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 		else:
 			for key in res2.keys()[1:]:
 				res[key][i] = np.nan
-	
+
 	# cut to entries without masked pmra values; otherwise the crossmatch will break
 	problem_inds = np.where(res['pmra'].mask)[0]
 
@@ -325,7 +324,6 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	res['e_Hmag'] = twomass_res['e_Hmag'][idx_gaia]
 	res['Kmag'] = twomass_res['Kmag'][idx_gaia]
 	res['e_Kmag'] = twomass_res['e_Kmag'][idx_gaia]
-
 	
 	# determine which chip the sources fall on 
 	# 0 = bottom, 1 = top 
@@ -416,7 +414,6 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 		ax1.tick_params(labelsize=12)
 		plt.tight_layout()
 
-		breakpoint()
 	
 	# create the output dataframe consisting of the target as the 0th entry and the reference stars
 	output_table = copy.deepcopy(res)
@@ -426,7 +423,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	set_tierras_permissions(source_path)
 
 	logger.debug(f'Saved source csv to {source_path}')
-	breakpoint()
+	# breakpoint() 
 	return output_df
 
 def load_bad_pixel_mask():
@@ -827,74 +824,92 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 			dome_humidities[i] = source_header['DOMEHUMI']
 		except:
 			dome_humidities[i] = np.nan 
+
 		try:
 			dome_temps[i] = source_header['DOMETEMP']
 		except:
 			dome_temps[i] = np.nan 
+
 		try:
 			sec_temps[i] = source_header['SECTEMP']
 		except:
 			sec_temps[i] = np.nan 
+
 		try:
 			rod_temps[i] = source_header['RODTEMP']
 		except:
 			rod_temps[i] = np.nan
+
 		try:
 			cab_temps[i] = source_header['CABTEMP']
 		except:
 			cab_temps[i] = np.nan 
+
 		try:
 			inst_temps[i] = source_header['INSTTEMP']
 		except:
 			inst_temps[i] = np.nan
+
 		try:
 			ret_temps[i] = source_header['RETTEMP']
 		except:
 			ret_temps[i] = np.nan
+
 		try:
 			pri_temps[i] = source_header['PRITEMP']
 		except:
 			pri_temps[i] = np.nan 
+
 		try:
 			dewpoints[i] = source_header['DEWPOINT']
 		except:
 			dewpoints[i] = np.nan
+
 		try:
 			temps[i] = source_header['TEMPERAT']
 		except:
 			temps[i] = np.nan
+
 		try:
 			humidities[i] = source_header['HUMIDITY']
 		except:
 			humidities[i] = np.nan 
+
 		try:
 			sky_temps[i] = source_header['SKYTEMP']
 		except:
 			sky_temps[i] = np.nan
+
 		try:
 			pressures[i] = source_header['PRESSURE']
 		except:
 			pressures[i] = np.nan
+
 		try:
 			return_pressures[i] = source_header['PSPRES1']
 		except: 
 			return_pressures[i] = np.nan 
+
 		try:
 			supply_pressures[i] = source_header['PSPRES2']
 		except:
 			supply_pressures[i] = np.nan 
+
 		try:
 			dome_azimuths[i] = source_header['DOMEAZ']
 		except:
 			dome_azimuths[i] = np.nan 
+
 		try:
 			wind_speeds[i] = source_header['WINDSPD']
 		except:
 			wind_speeds[i] = np.nan 
+
 		try:
 			wind_gusts[i] = source_header['WINDGUST']
 		except:
 			wind_gusts[i] = np.nan 
+			
 		try:
 			wind_dirs[i] = source_header['WINDDIR']
 		except:
@@ -1182,8 +1197,8 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		data = [np.round(source_radii[i], 1), np.round(an_in_radii[i], 1), np.round(an_out_radii[i], 1)]
 		for j in range(n_sources):
 			source_name = f'S{j}'
-			names.extend([source_name+' X', source_name+' Y', source_name+' Source-Sky', source_name+' Source-Sky Err', source_name+' Sky', source_name+' X FWHM', source_name+' Y FWHM', source_name+' Theta', source_name+' NL Flag', source_name+' Sat Flag', source_name+' Interp Flag'])
-			data.extend([np.round(source_x[j], 2), np.round(source_y[j], 2), np.round(source_minus_sky_ADU[i,j],4), np.round(source_minus_sky_err_ADU[i,j],4), np.round(source_sky_ADU[j],2), np.round(source_x_fwhm_arcsec[j], 1), np.round(source_y_fwhm_arcsec[j],1), np.round(source_theta_radians[j], 1), non_linear_flags[i,j], saturated_flags[i,j], interpolation_flags[i,j]])
+			names.extend([source_name+' X', source_name+' Y', source_name+' Source-Sky', source_name+' Source-Sky Err', source_name+' Sky', source_name+' NL Flag', source_name+' Sat Flag'])
+			data.extend([np.round(source_x[j], 2), np.round(source_y[j], 2), np.round(source_minus_sky_ADU[i,j],4), np.round(source_minus_sky_err_ADU[i,j],4), np.round(source_sky_ADU[j],2), non_linear_flags[i,j], saturated_flags[i,j]])
 
 		tab = pa.Table.from_arrays(data, names)
 		
@@ -2863,6 +2878,7 @@ def main(raw_args=None):
 	ap.add_argument("-centroid",required=False,default=False,help="Whether or not to centroid during aperture photometry.",type=str)
 	ap.add_argument("-centroid_type",required=False,default='centroid_1dg',help="Photutils centroid function. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.",type=str)
 	ap.add_argument("-interpolate_cosmics",required=False,default=False,help="Whether or not to identify and interpolate cosmic ray hits (not working at present!)")
+	ap.add_argument("-rp_mag_limit", required=False, default=17, type=float, help="Gaia Rp magnitude limit for source identification.")
 	args = ap.parse_args(raw_args)
 
 	#Access observation info
@@ -2878,6 +2894,7 @@ def main(raw_args=None):
 	centroid = t_or_f(args.centroid)
 	interpolate_cosmics = t_or_f(args.interpolate_cosmics)
 	centroid_type = args.centroid_type
+	rp_mag_limit = args.rp_mag_limit
 
 	# set up the directories for storing photometry data 
 	make_data_dirs(date, target, ffname)
@@ -2913,7 +2930,7 @@ def main(raw_args=None):
 	flattened_files = get_flattened_files(date, target, ffname)
 
 	# identify sources in the field 
-	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=True, overwrite=True)
+	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=True, overwrite=True, rp_mag_limit=rp_mag_limit)
 
 	# do photometry 
 	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False)

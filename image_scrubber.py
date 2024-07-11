@@ -24,7 +24,12 @@ class ImageScrubber:
 		self.image_folder = file_list[0].parent
 		self.file_list = file_list 
 		self.phot_file_list = phot_file_list
-		self.phot_dfs, self.phot_df_file_names = self.load_photometry(phot_file_list)
+		try:
+			self.phot_dfs, self.phot_df_file_names = self.load_photometry(phot_file_list)
+		except:
+			self.phot_dfs = []
+			self.phot_df_file_names = []
+			print('No photometry found! Skipping centroid read-in.')
 
 		self.date = self.file_list[0].name.split('.')[0]
 		self.target = self.file_list[0].name.split('.')[2].split('_')[0]
