@@ -670,6 +670,15 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	ffname = file_list[0].parent.name	
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
+
+	ancillary_path = f'/data/tierras/photometry/{date}/{target}/{ffname}/{date}_{target}_ancillary_data.parquet'
+	if phot_type == 'variable' and not os.path.exists(ancillary_path):
+		raise RuntimeError(f'No ancillary data file found at {ancillary_path}! Run measure_fwhm_grid first')
+	else:
+		ancillary_tab = pq.read_table(ancillary_path)
+		fwhm_x = np.array(ancillary_tab['FWHM X'])
+		fwhm_y = np.array(ancillary_tab['FWHM Y'])
+		theta = np.array(ancillary_tab['Theta'])
 	
 	# file_list = file_list[-10:] #TESTING!!!	
 	n_files = len(file_list)
@@ -695,8 +704,6 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	SATURATION_THRESHOLD = 55000. #ADU
 	PLATE_SCALE = 0.432 #arcsec pix^-1, from Juliana's dissertation Table 1.1
 	
-	fit_g = fitting.LevMarLSQFitter() # fitter object for fitting 2D gaussians to measure FWHM
-
 	#Set up arrays for doing photometry 
 
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH FILE
@@ -737,10 +744,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	#ARRAYS THAT CONTAIN DATA PERTAINING TO EACH SOURCE IN EACH FILE
 	source_x = np.zeros((n_sources,n_files),dtype='float32')
 	source_y = np.zeros((n_sources,n_files),dtype='float32')
-	source_sky_ADU = np.zeros((n_sources,n_files),dtype='float32')
-	source_x_fwhm_arcsec = np.zeros((n_sources,n_files),dtype='float32')
-	source_y_fwhm_arcsec = np.zeros((n_sources,n_files),dtype='float32')
-	source_theta_radians = np.zeros((n_sources,n_files),dtype='float32')
+	source_sky_ADU = np.zeros((n_sources,n_files),dtype='float32')	
 
 	#ARRAYS THAT CONTAIN DATA PERTAININING TO EACH APERTURE RADIUS FOR EACH SOURCE FOR EACH FILE
 	source_minus_sky_ADU = np.zeros((n_aps,n_sources,n_files),dtype='float32')
@@ -777,7 +781,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	# only data within a radius of x pixels around the expected source positions from WCS will be considered for centroiding
 	centroid_footprint = circular_footprint(5)
 
-	logger.info(f'Doing fixed-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.')
+	logger.info(f'Doing {phot_type}-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.')
 
 	#TODO: this is only approximate since we measure background on sigma-clipped distribution
 	nb = np.pi*an_out**2 - np.pi*an_in**2
@@ -991,10 +995,10 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		if phot_type == 'fixed':
 			apertures = [CircularAperture(source_positions,r=ap_radii[k]) for k in range(len
 			(ap_radii))]
-
-		# TODO: need to implement variable apertures!
-		# elif type == 'variable':
-		# 	apertures = [CircularAperture(source_positions,r=ap_radii[k]*smoothed_fwhm_pix[i])]	
+		elif phot_type == 'variable':
+			# if running with variable apertures, create a smoothed time series of FWHM measurements
+			# apertures = [CircularAperture(source_positions,r=ap_radii[k]*smoothed_fwhm_pix[i])]	
+			apertures = [CircularAperture(source_positions,r=ap_radii[k]*fwhm_x[i]/PLATE_SCALE) for k in range(len(ap_radii))]
 
 		tbkg = time.time()	
 		# measure background
@@ -1177,7 +1181,17 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	output_path = Path('/data/tierras/photometry/'+date+'/'+target+'/'+ffname+f'/{date}_{target}_ancillary_data.parquet')
 
 	names = ['Filename', 'JD UTC', 'BJD TDB', 'Exposure Time', 'Airmass', 'CCD Temp', 'Dome Temp', 'Focus', 'Dome Humid', 'Sec Temp', 'Ret Temp', 'Pri Temp', 'Rod Temp', 'Cab Temp', 'Inst Temp', 'Temp', 'Humid', 'Dewpoint', 'Sky Temp', 'Lunar Dist', 'Pressure', 'Ret Pressure', 'Supp Pressure', 'HA', 'Dome Az', 'Wind Spd', 'Wind Gust', 'Wind Dir','WCS Flag']
-	data = [filenames, np.round(jd_utc, 7), np.round(bjd_tdb, 7), np.round(exp_times, 2), np.round(airmasses, 2), np.round(ccd_temps, 1), np.round(dome_temps, 2), np.round(focuses, 1), np.round(dome_humidities, 2), np.round(sec_temps, 1),  np.round(ret_temps, 1), np.round(pri_temps, 1), np.round(rod_temps, 1), np.round(cab_temps, 1), np.round(inst_temps, 1), np.round(temps, 1), np.round(humidities, 1), np.round(dewpoints, 1), np.round(sky_temps, 1), np.round(lunar_distance, 2), np.round(pressures, 1), np.round(return_pressures, 0), np.round(supply_pressures, 0), np.round(hour_angles, 3), np.round(dome_azimuths, 1), np.round(wind_speeds, 2), np.round(wind_gusts, 2), np.round(wind_dirs, 0), wcs_flags]
+
+	data = [filenames, np.round(jd_utc, 7), np.round(bjd_tdb, 7), np.round(exp_times, 2), np.round(airmasses, 6), np.round(ccd_temps, 1), np.round(dome_temps, 2), np.round(focuses, 1), np.round(dome_humidities, 2), np.round(sec_temps, 1),  np.round(ret_temps, 1), np.round(pri_temps, 1), np.round(rod_temps, 1), np.round(cab_temps, 1), np.round(inst_temps, 1), np.round(temps, 1), np.round(humidities, 1), np.round(dewpoints, 1), np.round(sky_temps, 1), np.round(lunar_distance, 2), np.round(pressures, 1), np.round(return_pressures, 0), np.round(supply_pressures, 0), np.round(hour_angles, 3), np.round(dome_azimuths, 1), np.round(wind_speeds, 2), np.round(wind_gusts, 2), np.round(wind_dirs, 0), wcs_flags]
+
+	if os.path.exists(output_path):
+		names.append('FWHM X')
+		names.append('FWHM Y')
+		names.append('Theta')
+		data.append(fwhm_x)
+		data.append(fwhm_y)
+		data.append(theta)
+
 	tab = pa.Table.from_arrays(data, names)
 		
 	if not os.path.exists(output_path.parent.parent):
@@ -1214,423 +1228,6 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	plt.close('all')
 	return 
 
-def plot_target_summary(file_path,pval_threshold=0.01,bin_mins=15):
-	date = file_path.parent.parent.parent.name
-	target = file_path.parent.parent.name
-	ffname = file_path.parent.name 
-
-	df = pd.read_csv(file_path)
-	times = np.array(df['BJD TDB'])
-	x_offset =  int(np.floor(times[0]))
-	times -= x_offset
-
-	targ_flux = np.array(df['Target Source-Sky ADU'])
-	targ_flux_err = np.array(df['Target Source-Sky Error ADU'])
-	targ_pp_flux = np.array(df['Target Post-Processed Normalized Flux'])
-	targ_pp_flux_err = np.array(df['Target Post-Processed Normalized Flux Error'])
-
-	#NEW: generate ALC using reference star weights
-	alc_flux, alc_flux_err = weighted_alc(file_path)
-
-	# #OLD: use ensemble ALC from light curve file
-	# alc_flux = np.array(df['Target Ensemble ALC ADU'])
-	# alc_flux_err = np.array(df['Target Ensemble ALC Error ADU'])
-
-	#Set up dictionary containing ancillary data to check for significant correlations
-	ancillary_dict = {}
-	ancillary_dict['Airmass'] = np.array(df['Airmass'])
-	ancillary_dict['Target Sky ADU'] = np.array(df['Target Sky ADU'])
-	ancillary_dict['Target X'] = np.array(df['Target X']) - np.median(df['Target X'])
-	ancillary_dict['Target Y'] = np.array(df['Target Y']) - np.median(df['Target Y'])
-	ancillary_dict['Target X FWHM Arcsec'] = np.array(df['Target X FWHM Arcsec'])
-	ancillary_dict['Target Y FWHM Arcsec'] = np.array(df['Target Y FWHM Arcsec'])
-
-	v1,l1,h1 = sigmaclip(targ_flux,3,3)
-	v2,l2,h2 = sigmaclip(alc_flux,3,3)
-	use_inds = np.where((targ_flux>l1)&(targ_flux<h1)&(alc_flux>l2)&(alc_flux<h2))[0]
-	times = times[use_inds]
-	targ_flux = targ_flux[use_inds]
-	targ_flux_err = targ_flux_err[use_inds]
-	targ_pp_flux = targ_pp_flux[use_inds]
-	targ_pp_flux_err = targ_pp_flux_err[use_inds]
-	alc_flux = alc_flux[use_inds]
-	alc_flux_err = alc_flux_err[use_inds]
-	#planet_model = planet_model[use_inds]
-
-	for key in ancillary_dict.keys():
-		ancillary_dict[key] = ancillary_dict[key][use_inds]
-
-	targ_flux_norm_factor = np.median(targ_flux)
-	targ_flux_norm = targ_flux / targ_flux_norm_factor
-	targ_flux_err_norm = targ_flux_err / targ_flux_norm_factor
-
-	alc_flux_norm_factor = np.median(alc_flux)
-	alc_flux_norm = alc_flux/alc_flux_norm_factor
-	alc_flux_err_norm = alc_flux_err/alc_flux_norm_factor
-
-	corrected_targ_flux = targ_flux_norm/alc_flux_norm
-	corrected_targ_flux_err = np.sqrt((targ_flux_err_norm/alc_flux_norm)**2 + (targ_flux_norm*alc_flux_err_norm/(alc_flux_norm**2))**2)
-
-	v,l,h = sigmaclip(corrected_targ_flux)
-	use_inds = np.where((corrected_targ_flux>l)&(corrected_targ_flux<h))[0]
-	times = times[use_inds]
-	targ_flux = targ_flux[use_inds]
-	targ_flux_err = targ_flux_err[use_inds]
-	targ_pp_flux = targ_pp_flux[use_inds]
-	targ_pp_flux_err = targ_pp_flux_err[use_inds]
-	alc_flux = alc_flux[use_inds]
-	alc_flux_err = alc_flux_err[use_inds]
-	targ_flux_norm = targ_flux_norm[use_inds]
-	targ_flux_err_norm = targ_flux_err_norm[use_inds]
-	alc_flux_norm = alc_flux_norm[use_inds]
-	alc_flux_err_norm = alc_flux_err_norm[use_inds]
-	corrected_targ_flux = corrected_targ_flux[use_inds]
-	corrected_targ_flux_err = corrected_targ_flux_err[use_inds]
-	for key in ancillary_dict.keys():
-		ancillary_dict[key] = ancillary_dict[key][use_inds]
-
-	norm = np.mean(corrected_targ_flux)
-	corrected_targ_flux /= norm 
-	corrected_targ_flux_err /= norm 
-
-	#fig, ax = plt.subplots(7,1,figsize=(6,9), gridspec_kw={'height_ratios':[1,1,0.5,0.5,0.5,0.5,1],})
-
-	fig = plt.figure(figsize=(8,9))	
-	gs = gridspec.GridSpec(8,1,height_ratios=[0.75,1,1,0.75,0.75,0.75,0.75,1])
-	ax1 = plt.subplot(gs[0])
-	ax2 = plt.subplot(gs[1],sharex=ax1)
-	ax3 = plt.subplot(gs[2],sharex=ax1,sharey=ax2)
-	ax4 = plt.subplot(gs[3],sharex=ax1)
-	ax5 = plt.subplot(gs[4],sharex=ax1)
-	ax6 = plt.subplot(gs[5],sharex=ax1)
-	ax7 = plt.subplot(gs[6],sharex=ax1)
-	ax8 = plt.subplot(gs[7])
-
-
-	label_size = 11
-	ax1.errorbar(times, targ_flux_norm, targ_flux_err_norm, marker='.', color='k',ls='', ecolor='k', label='Norm. targ. flux')
-	ax1.errorbar(times, alc_flux_norm, alc_flux_err_norm, marker='.', color='r',ls='', ecolor='r', label='Norm. ALC flux')
-	ax1.tick_params(labelsize=label_size)
-	ax1.legend(loc='center left', bbox_to_anchor=(1,0.5),fontsize=10)
-	
-	#ax[0].grid(alpha=0.8)
-	ax1.set_ylabel('Norm. Flux',fontsize=label_size)
-	ax1.tick_params(labelbottom=False)
-
-	ax2.plot(times, corrected_targ_flux, marker='.',color='#b0b0b0',ls='',label='Rel. targ. flux')
-	#bin_mins=15
-	bx, by, bye = tierras_binner(times, corrected_targ_flux, bin_mins=bin_mins)
-	ax2.errorbar(bx,by,bye,marker='o',mfc='none',mec='k',mew=1.5,ecolor='k',ms=7,ls='',zorder=3,label=f'{bin_mins:d}-min bins')
-	ax2.legend(loc='center left', bbox_to_anchor=(1,0.5),fontsize=10)
-	ax2.tick_params(labelsize=label_size)
-	ax2.set_ylabel('Norm. Flux',fontsize=label_size)
-	ax2.tick_params(labelbottom=False)
-
-	ax3.plot(times, targ_pp_flux, marker='.',color='#b0b0b0',ls='',label='Post-processed flux')
-	bx, by, bye = tierras_binner(times, targ_pp_flux, bin_mins=bin_mins)
-	ax3.errorbar(bx,by,bye,marker='o',mfc='none',mec='k',mew=1.5,ecolor='k',ms=7,ls='',zorder=3,label=f'{bin_mins:d}-min bins')
-	ax3.legend(loc='center left', bbox_to_anchor=(1,0.5),fontsize=10)
-	ax3.tick_params(labelsize=label_size)
-	ax3.set_ylabel('Norm. Flux',fontsize=label_size)
-	ax3.tick_params(labelbottom=False)
-
-	ax4.plot(times,ancillary_dict['Airmass'], color='tab:blue',lw=2)
-	ax4.tick_params(labelsize=label_size)
-	ax4.set_ylabel('Airmass',fontsize=label_size)
-	ax4.tick_params(labelbottom=False)
-
-	ax5.plot(times,ancillary_dict['Target Sky ADU'],color='tab:orange',lw=2)
-	ax5.tick_params(labelsize=label_size)
-	ax5.set_ylabel('Sky\n(ADU)',fontsize=label_size)
-	ax5.tick_params(labelbottom=False)
-
-	ax6.plot(times,ancillary_dict['Target X'],color='tab:green',lw=2,label='X-med(X)')
-	ax6.plot(times,ancillary_dict['Target Y'],color='tab:red',lw=2,label='Y-med(Y)')
-	ax6.tick_params(labelsize=label_size)
-	ax6.set_ylabel('Pos.',fontsize=label_size)
-	ax6.legend(loc='center left', bbox_to_anchor=(1,0.5),fontsize=10)
-	v1,l1,h1 = sigmaclip(ancillary_dict['Target X'],5,5)
-	v2,l2,h2 = sigmaclip(ancillary_dict['Target X'],5,5)
-	ax6.set_ylim(np.min([l1,l2]),np.max([h1,h2]))
-	ax6.tick_params(labelbottom=False)
-
-	ax7.plot(times,ancillary_dict['Target X FWHM Arcsec'],color='tab:pink',lw=2,label='X')
-	ax7.plot(times, ancillary_dict['Target Y FWHM Arcsec'], color='tab:purple', lw=2,label='Y')
-	ax7.legend(loc='center left', bbox_to_anchor=(1,0.5),fontsize=10)
-	ax7.tick_params(labelsize=label_size)
-	ax7.set_ylabel('FWHM\n(")',fontsize=label_size)
-	ax7.set_xlabel(f'Time - {x_offset}'+' (BJD$_{TDB}$)',fontsize=label_size)
-
-	#Do bin plot
-	bins = np.arange(0.5,20.5,0.5)
-	std, theo = juliana_binning(bins, times, corrected_targ_flux, corrected_targ_flux_err)
-
-	ax8.plot(bins, std[1:]*1e6, lw=2,label='Measured')
-	ax8.plot(bins, theo[1:]*1e6,lw=2,label='Theoretical')
-	std, theo = juliana_binning(bins, times, targ_pp_flux, targ_pp_flux_err)
-	ax8.plot(bins, std[1:]*1e6, lw=2,label='Measured post-processing')
-
-	ax8.set_xlabel('Bin size (min)',fontsize=label_size)
-	ax8.set_ylabel('$\sigma$ (ppm)',fontsize=label_size)
-	ax8.set_yscale('log')
-	ax8.legend(loc='center left', bbox_to_anchor=(1,0.5),fontsize=10)
-	ax8.tick_params(labelsize=label_size)
-
-	fig.align_labels()
-	plt.tight_layout()
-	plt.subplots_adjust(hspace=0.7)
-
-	summary_plot_output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{date}_{target}_summary.png'
-	plt.savefig(summary_plot_output_path,dpi=300)
-	set_tierras_permissions(summary_plot_output_path)
-
-	plt.close('all')
-	return
-
-def plot_target_lightcurve(lc_path,bin_mins=15):
-	plt.ion()
-	lc_path = Path(lc_path)
-	ffname = lc_path.parent.name
-	target = lc_path.parent.parent.name
-	date = lc_path.parent.parent.parent.name
-
-	df = pd.read_csv(lc_path)
-	# targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
-	# n_refs = len(targ_and_refs)
-
-
-	times = np.array(df['BJD TDB'])
-	targ_flux = np.array(df['Target Source-Sky ADU'])
-	targ_flux_err = np.array(df['Target Source-Sky Error ADU'])
-	targ_pp_flux = np.array(df['Target Post-Processed Normalized Flux'])
-	targ_pp_flux_err = np.array(df['Target Post-Processed Normalized Flux Error'])
-
-	
-	# NEW: Use weighted ALC
-	alc_flux, alc_flux_err = weighted_alc(lc_path)
-	rel_flux = targ_flux / alc_flux 
-	rel_flux_err = np.sqrt((targ_flux_err/alc_flux)**2+(targ_flux*alc_flux_err/(alc_flux**2))**2)
-
-	#Sigma clip
-	v, l, h = sigmaclip(rel_flux)
-	use_inds = np.where((rel_flux>l)&(rel_flux<h))[0]
-	targ_flux = targ_flux[use_inds]
-	targ_flux_err = targ_flux_err[use_inds]
-	alc_flux = alc_flux[use_inds]
-	alc_flux_err = alc_flux_err[use_inds]
-	rel_flux = rel_flux[use_inds]
-	rel_flux_err = rel_flux_err[use_inds]
-
-	renorm = np.nanmean(rel_flux)
-	rel_flux /= renorm
-	rel_flux_err /= renorm
-
-	renorm = np.nanmean(targ_flux)
-	targ_flux /= renorm
-	targ_flux_err /= renorm 
-
-	renorm = np.nanmean(alc_flux)
-	alc_flux /= renorm 
-	alc_flux_err /= renorm
-
-	#print(f"bp_rp: {targ_and_refs['bp_rp'][i+1]}")
-	fig, ax = plt.subplots(3,1,figsize=(10,10),sharex=True)
-	
-	bx, by, bye = tierras_binner(times[use_inds],rel_flux,bin_mins=bin_mins)
-
-	fig.suptitle(f'{target} on {date}',fontsize=16)
-	ax[0].errorbar(times[use_inds], targ_flux, targ_flux_err, color='k',ecolor='k',marker='.',ls='',zorder=3,label='Target')
-	ax[0].errorbar(times[use_inds], alc_flux, alc_flux_err, color='r', ecolor='r', marker='.',ls='',zorder=3,label='ALC')
-	ax[0].set_ylabel('Normalized Flux', fontsize=16)
-	ax[0].tick_params(labelsize=14)
-	ax[0].grid(True, alpha=0.8)
-	ax[0].legend()
-
-	ax[1].plot(times[use_inds], rel_flux,  marker='.', ls='', color='#b0b0b0')
-	ax[1].errorbar(bx,by,bye,marker='o',color='none',ecolor='k',mec='k',mew=2,ms=5,ls='',label=f'{bin_mins}-min binned photometry',zorder=3)
-	ax[1].tick_params(labelsize=14)
-	ax[1].set_ylabel('Normalized Flux',fontsize=16)
-	ax[1].grid(True, alpha=0.8)
-	ax[1].legend()
-	
-	ax[2].plot(times[use_inds],targ_pp_flux[use_inds],marker='.', ls='', color='#b0b0b0')
-	bx, by, bye = tierras_binner(times[use_inds],targ_pp_flux[use_inds],bin_mins=bin_mins)
-	ax[2].errorbar(bx,by,bye,marker='o',color='none',ecolor='k',mec='k',mew=2,ms=5,ls='',label=f'{bin_mins}-min binned photometry',zorder=3)
-	ax[2].tick_params(labelsize=14)
-	ax[2].set_ylabel('Normalized Flux',fontsize=16)
-	ax[2].grid(True, alpha=0.8)
-	ax[2].legend()
-	ax[2].set_title('Post-Processed Flux',fontsize=16)
-	ax[2].set_xlabel('Time (BJD$_{TDB}$)',fontsize=16)
-	# model_times = np.arange(min(times[use_inds]),max(times[use_inds]),0.0005)
-	# planet_flux = transit_model(model_times, 2459497.184957, 25.522952715243/2, np.sqrt(1179.7/1e6), 84.4, 90, 0, 90, 0.1, 0.3)
-	# ax[1].plot(model_times, planet_flux)
-
-	plt.tight_layout()
-	#plt.subplots_adjust(hspace=0.04)
-	output_path = f'/data/tierras/lightcurves/{date}/{target}/{ffname}/{date}_{target}_lc.png'
-	plt.savefig(output_path,dpi=300)
-	set_tierras_permissions(output_path)
-
-	plt.close()
-	return
-
-def plot_ref_lightcurves(lc_path, bin_mins=15):
-	plt.ioff()
-	lc_path = Path(lc_path)
-	parents = lc_path.parents
-	ffname = parents[0].name
-	target = parents[1].name
-	date = parents[2].name
-	output_path = lc_path.parent/'reference_lightcurves/'
-	if not os.path.exists(output_path):
-		os.mkdir(output_path)		
-		set_tierras_permissions(output_path)
-
-	#Clear out existing files
-	existing_files = glob(str(output_path/'*.png'))
-	for file in existing_files:
-		os.remove(file)
-
-	df = pd.read_csv(lc_path)
-	# targ_and_refs = pd.read_csv(f'/data/tierras/targets/{target}/{target}_target_and_ref_stars.csv')
-	# n_refs = len(targ_and_refs)-1
-
-	n_refs = int(df.keys()[-1].split('Ref ')[1].split(' ')[0])
-
-	if n_refs == 1:
-		print('Only 1 reference, cannot create reference ALC.')
-		return
-
-	times = np.array(df['BJD TDB'])
-
-	weight_df = pd.read_csv(f'/data/tierras/lightcurves/{date}/{target}/{ffname}/night_weights.csv')
-	weights = np.array(weight_df['Weight'])
-
-	n_ims = len(df)
-	ref_fluxes = np.zeros((n_ims, n_refs))
-	ref_flux_errs = np.zeros((n_ims, n_refs))
-	ref_pp_fluxes = np.zeros((n_ims,n_refs))
-	ref_pp_flux_errs = np.zeros((n_ims,n_refs))
-	for i in range(n_refs):
-		ref_fluxes[:,i] = np.array(df[f'Ref {i+1} Source-Sky ADU'])
-		ref_flux_errs[:,i] = np.array(df[f'Ref {i+1} Source-Sky Error ADU'])
-		ref_pp_fluxes[:,i] = np.array(df[f'Ref {i+1} Post-Processed Normalized Flux'])
-		ref_pp_flux_errs[:,i] = np.array(df[f'Ref {i+1} Post-Processed Normalized Flux Error'])
-
-	for i in range(n_refs):
-		print(f'Doing Ref {i+1} of {n_refs}')
-		inds = np.array([j for j in range(n_refs) if j != i])
-
-		#NEW: Calculate ALC using weights (excluding the weight of this particular ref star)
-		weights_use = weights[inds] 
-		weights_use /= sum(weights_use)
-
-		alc = np.sum(weights_use*ref_fluxes[:,inds],axis=1)
-		alc_err = np.sqrt(np.sum((weights_use*ref_flux_errs[:,inds])**2,axis=1))
-
-		rel_flux = ref_fluxes[:,i]/alc
-		rel_flux_err = np.sqrt((ref_flux_errs[:,i]/alc)**2+(ref_fluxes[:,i]*alc_err/(alc**2))**2)
-
-		# #OLD: Use relative flux as calculated using ensemble ALC
-		# rel_flux = np.array(df[f'Ref {i+1} Relative Flux'])
-		# rel_flux_err = np.array(df[f'Ref {i+1} Relative Flux Error'])
-		
-		#Sigma clip
-		v, l, h = sigmaclip(rel_flux)
-		use_inds = np.where((rel_flux>l)&(rel_flux<h))[0]
-		rel_flux = rel_flux[use_inds]
-		rel_flux_err = rel_flux_err[use_inds]
-
-		renorm = np.nanmean(rel_flux)
-		rel_flux /= renorm
-		rel_flux_err /= renorm
-
-		#print(f"bp_rp: {targ_and_refs['bp_rp'][i+1]}")
-		fig, ax = plt.subplots(2,1,figsize=(10,7),sharex=True)
-		
-		bx, by, bye = tierras_binner(times[use_inds],rel_flux,bin_mins=bin_mins)
-
-		fig.suptitle(f'Reference {i+1}, Weight={weights[i]:.2g}',fontsize=16)
-
-		ax[0].plot(times[use_inds], rel_flux,  marker='.', ls='', color='#b0b0b0')
-		ax[0].errorbar(bx,by,bye,marker='o',color='none',ecolor='k',mec='k',mew=2,ms=5,ls='',label=f'{bin_mins}-min binned photometry',zorder=3)
-		#ax.set_ylim(0.975,1.025)
-		ax[0].tick_params(labelsize=14)
-		ax[0].set_ylabel('Normalized Flux',fontsize=16)
-		ax[0].grid(True, alpha=0.8)
-		ax[0].legend()
-
-		ax[1].plot(times[use_inds], ref_pp_fluxes[:,i][use_inds],  marker='.', ls='', color='#b0b0b0')
-		bx,by,bye = tierras_binner(times[use_inds],ref_pp_fluxes[:,i][use_inds],bin_mins=bin_mins)
-		ax[1].errorbar(bx,by,bye,marker='o',color='none',ecolor='k',mec='k',mew=2,ms=5,ls='',label=f'{bin_mins}-min binned photometry',zorder=3)
-		#ax.set_ylim(0.975,1.025)
-		ax[1].tick_params(labelsize=14)
-		ax[1].set_xlabel('Time (BJD$_{TDB}$)',fontsize=16)
-		ax[1].set_ylabel('Normalized Flux',fontsize=16)
-		ax[1].grid(True, alpha=0.8)
-		ax[1].legend()
-		ax[1].set_title('Post-Processed Flux')
-		
-		plt.tight_layout()
-		plt.savefig(output_path/f'ref_{i+1}.png',dpi=300)
-		set_tierras_permissions(output_path/f'ref_{i+1}.png')
-
-		plt.close()
-	plt.ion()
-	return
-
-def plot_raw_fluxes(lc_path):
-	lc_path = Path(lc_path)
-	ffname = lc_path.parent.name
-	target = lc_path.parent.parent.name
-	date = lc_path.parent.parent.parent.name
-
-	df = pd.read_csv(lc_path)
-	times = np.array(df['BJD TDB'])
-	x_offset = int(np.floor(times[0]))
-	times -= x_offset 
-
-	targ_flux = np.array(df['Target Source-Sky ADU'])
-	#targ_flux /= np.median(targ_flux)
-
-	n_refs = int(df.keys()[-1].split('Ref ')[1].split(' ')[0])
-
-	plt.figure(figsize=(10,12))
-	plt.plot(times, targ_flux, '.', color='k', label='Targ.')
-	plt.text(times[0]-(times[-1]-times[0])/75,targ_flux[0],'Targ.',color='k',ha='right',va='center',fontsize=12)
-
-	xvals = np.zeros(n_refs+1) + times[0] - (times[-1]-times[0])/200
-	#xvals[0] = times[0]
-	#markers = ['v','s','p','*','+','x','D','|','X']
-	markers = ['.']
-	#colors = plt.get_cmap('viridis_r')
-	#offset = 0.125
-	colors = ['tab:blue','tab:orange','tab:green','tab:red','tab:purple','tab:brown','tab:pink','tab:grey','tab:olive','tab:cyan']
-	for i in range(n_refs):
-		ref_flux = np.array(df[f'Ref {i+1} Source-Sky ADU'])
-		#ref_flux /= np.median(ref_flux)
-		plt.plot(times, ref_flux, marker=markers[i%len(markers)],ls='',label=f'{i+1}',color=colors[i%len(colors)])
-		if i % 2 == 0:
-			plt.text(times[0]-(times[-1]-times[0])/25,ref_flux[0],f'{i+1}',color=colors[i%len(colors)],ha='right',va='center',fontsize=12)
-		else:
-			plt.text(times[0]-(times[-1]-times[0])/100,ref_flux[0],f'{i+1}',color=colors[i%len(colors)],ha='right',va='center',fontsize=12)
-	#breakpoint()
-	plt.yscale('log')
-	#plt.legend(loc='center left', bbox_to_anchor=(1,0.5),ncol=2)
-	plt.xlim(times[0]-(times[-1]-times[0])/15,times[-1]+(times[-1]-times[0])/100)
-
-	plt.ylabel('Flux (ADU)',fontsize=14)
-	plt.xlabel(f'Time - {x_offset}'+' (BJD$_{TDB}$)',fontsize=14)
-	plt.tick_params(labelsize=14)
-	plt.tight_layout()
-
-	output_path = lc_path.parent/f'{date}_{target}_raw_flux.png'
-	plt.savefig(output_path,dpi=300)
-	set_tierras_permissions(output_path)
-	plt.close()
-
-	return 
 
 def tierras_binner(t, y, bin_mins=15):
 	x_offset = t[0]
@@ -2860,7 +2457,9 @@ def measure_fwhm_grid(date, field, ffname, sources, box_size=512):
 		pq.write_table(ancillary_tab, ancillary_path)
 		set_tierras_permissions(ancillary_path)
 	else:
-		print(f'No ancillary data file exists for {field} on {date}! Run circular_aperture_photometry first.')
+		ancillary_tab = pa.Table.from_arrays([np.round(fwhm_x, 2), np.round(fwhm_y, 2), np.round(theta, 2)], names=['FWHM X', 'FWHM Y', 'Theta'])
+		pq.write_table(ancillary_tab, ancillary_path)
+		set_tierras_permissions(ancillary_path)
 	return 	
 
 
@@ -2870,8 +2469,9 @@ def main(raw_args=None):
 	ap.add_argument("-date", required=True, help="Date of observation in YYYYMMDD format.")
 	ap.add_argument("-target", required=True, help="Name of observed target exactly as shown in raw FITS files.")
 	ap.add_argument("-ffname", required=False, default='flat0000', help="Name of folder in which to store reduced+flattened data. Convention is flatXXXX. XXXX=0000 means no flat was used.")
-	ap.add_argument("-ap_rad_lo", required=False, default=5, help="Lower bound of aperture radii in pixels. Apertures with sizes between ap_rad_lo and ap_rad_hi will be used.", type=float)
-	ap.add_argument("-ap_rad_hi", required=False, default=20, help="Upper bound of aperture radii in pixels. Apertures with sizes between ap_rad_lo and ap_rad_hi will be used.", type=float)
+	# ap.add_argument("-ap_rad_lo", required=False, default=5, help="Lower bound of aperture radii in pixels. Apertures with sizes between ap_rad_lo and ap_rad_hi will be used.", type=float)
+	# ap.add_argument("-ap_rad_hi", required=False, default=20, help="Upper bound of aperture radii in pixels. Apertures with sizes between ap_rad_lo and ap_rad_hi will be used.", type=float)
+	ap.add_argument('-ap_radii', required=True, type=str, nargs='+', help="Array of aperture radii for performing photometry. If phot_type=='fixed', ap_radii are interpreted as the radii of the circular apertures in pixels. If phot_type=='variable', they are interpreted as multiplicative factors of the seeing FWHM.")
 	ap.add_argument("-an_in", required=False, default=35, help='Inner background annulus radius in pixels.', type=float)
 	ap.add_argument("-an_out", required=False, default=55, help='Outer background annulus radius in pixels.', type=float)
 	ap.add_argument("-edge_limit",required=False,default=20,help="Minimum separation a source has from the detector edge to be considered as a reference star.",type=float)
@@ -2879,15 +2479,17 @@ def main(raw_args=None):
 	ap.add_argument("-centroid_type",required=False,default='centroid_1dg',help="Photutils centroid function. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.",type=str)
 	ap.add_argument("-interpolate_cosmics",required=False,default=False,help="Whether or not to identify and interpolate cosmic ray hits (not working at present!)")
 	ap.add_argument("-rp_mag_limit", required=False, default=17, type=float, help="Gaia Rp magnitude limit for source identification.")
+	ap.add_argument("-phot_type", required=False, default='fixed', type=str, help="'fixed' or 'variable'. Determines whether photometry is performed with fixed apertures or with apertures that vary with the measured seeing FWHM.")
 	args = ap.parse_args(raw_args)
 
 	#Access observation info
 	date = args.date
 	target = args.target
 	ffname = args.ffname
-	ap_rad_lo = args.ap_rad_lo 
-	ap_rad_hi = args.ap_rad_hi 
-	ap_radii = np.arange(ap_rad_lo, ap_rad_hi + 1)
+	# ap_rad_lo = args.ap_rad_lo 
+	# ap_rad_hi = args.ap_rad_hi 
+	# ap_radii = np.arange(ap_rad_lo, ap_rad_hi + 1)
+	ap_radii =  np.array([np.round(float(i),1) for i in args.ap_radii])
 	an_in = args.an_in 
 	an_out = args.an_out 
 	edge_limit = args.edge_limit
@@ -2895,6 +2497,7 @@ def main(raw_args=None):
 	interpolate_cosmics = t_or_f(args.interpolate_cosmics)
 	centroid_type = args.centroid_type
 	rp_mag_limit = args.rp_mag_limit
+	phot_type = args.phot_type
 
 	# set up the directories for storing photometry data 
 	make_data_dirs(date, target, ffname)
@@ -2930,14 +2533,20 @@ def main(raw_args=None):
 	flattened_files = get_flattened_files(date, target, ffname)
 
 	# identify sources in the field 
-	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=True, overwrite=True, rp_mag_limit=rp_mag_limit)
-
-	# do photometry 
-	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False)
+	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=False, overwrite=True, rp_mag_limit=rp_mag_limit)
 
 	# measure fwhm on grid of stars spread across the images
 	measure_fwhm_grid(date, target, ffname, sources)
-		
+
+	# do photometry 
+	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, phot_type=phot_type, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False)
+
+	
+	# close the logger
+	for handler in logger.handlers:
+		handler.close()
+		logger.removeHandler(handler)
+
 if __name__ == '__main__':
 	main()
 	
