@@ -59,9 +59,8 @@ def main():
     
     current_date = start_date
     while current_date.date() <= end_date:
-        # formatted_date = current_date.strftime("%Y%m%d")
-        # datepath = os.path.join(incomingpath, formatted_date)
-        
+        formatted_date = current_date.strftime("%Y%m%d")
+        datepath = os.path.join(incomingpath, formatted_date)
         row = [ind for ind, date in enumerate(gs_dates) if date == current_date.strftime("%m/%d/%Y")]
         
         if not row:
