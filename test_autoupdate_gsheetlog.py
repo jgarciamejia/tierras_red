@@ -50,6 +50,7 @@ def main():
     gc = authenticate_google_sheets(credentials_file, scope)
     sheet = gc.open('Tierras_Observing_Log').worksheet('2024')  # TODO: automate creation of new year log sheet!
     gs_dates = sheet.col_values(1)
+    col2, col3, col4 = 2, 3, 4
     
     tree_url = 'http://linmax.sao.arizona.edu/60logs/'
     log_links = fetch_log_links(tree_url)
@@ -62,18 +63,15 @@ def main():
         formatted_date = current_date.strftime("%Y%m%d")
         datepath = os.path.join(incomingpath, formatted_date)
         
-        if not os.path.exists(datepath):
-            current_date += timedelta(days=1)
-            continue
-        
-        flist = os.listdir(datepath)
         row = [ind for ind, date in enumerate(gs_dates) if date == current_date.strftime("%m/%d/%Y")]
+        
         if not row:
+            print ('{current_date} not found on Google Sheets'.format(current_date))
             current_date += timedelta(days=1)
             continue
         row = row[0] + 1
-        
-        col2, col3, col4 = 2, 3, 4
+
+        flist = os.listdir(datepath)
         if not flist:
             update_google_sheet(sheet, row, col2, 'No Observations Gathered')
             update_google_sheet(sheet, row, col3, '0')
