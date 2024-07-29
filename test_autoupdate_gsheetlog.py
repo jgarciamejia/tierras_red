@@ -54,13 +54,13 @@ def main():
     tree_url = 'http://linmax.sao.arizona.edu/60logs/'
     log_links = fetch_log_links(tree_url)
     
-    start_date = datetime(2024, 7, 19)
+    start_date = datetime(2024, 6, 1) #YYYY,MM,DD
     end_date = datetime.now().date()
     
     current_date = start_date
     while current_date.date() <= end_date:
-        formatted_date = current_date.strftime("%Y%m%d")
-        datepath = os.path.join(incomingpath, formatted_date)
+        # formatted_date = current_date.strftime("%Y%m%d")
+        # datepath = os.path.join(incomingpath, formatted_date)
         
         row = [ind for ind, date in enumerate(gs_dates) if date == current_date.strftime("%m/%d/%Y")]
         
@@ -89,17 +89,22 @@ def main():
         
         formatted_date2 = current_date.strftime("%Y.%m.%d")
         pattern = re.compile(r'^60log\.{}.[A-Za-z0-9]+\.shtml$'.format(formatted_date2))
-        log_name = next((link.get('href') for link in log_links if link.get('href') and pattern.match(link.get('href'))), None)
-        
-        if log_name: #TODO: deal with case where there are several log files
-           log_url = f"http://linmax.sao.arizona.edu/60logs/{log_name}"
-           log_response = requests.get(log_url)
-           if log_response.status_code == 200:
-               log_content = log_response.text
-               found_hours = [float(match) for match in re.findall(r'HOURS OBSERVED -- (\d{1,2}(?:\.\d{1,2})?)', log_content) if 0 <= float(match) <= 24]
-               if found_hours:
-                   update_google_sheet(sheet, row, col4, found_hours[0])
-        
+        #log_name = next((link.get('href') for link in log_links if link.get('href') and pattern.match(link.get('href'))), None)
+        log_names = [link.get('href') for link in log_links if link.get('href') and pattern.match(link.get('href'))]
+
+        for log_name in log_names:
+            #if log_name: 
+            log_url = f"http://linmax.sao.arizona.edu/60logs/{log_name}"
+            log_response = requests.get(log_url)
+            print (log_name,log_response)
+
+            if log_response.status_code == 200:
+                log_content = log_response.text
+                found_hours = [float(match) for match in re.findall(r'HOURS OBSERVED -- (\d{1,2}(?:\.\d{1,2})?)', log_content) if 0 <= float(match) <= 24]
+                if found_hours:
+                    print ('{},{},{},{}'.format(sheet, row, col4, found_hours[0]))
+                    update_google_sheet(sheet, row, col4, found_hours[0])
+            
         
         current_date += timedelta(days=1)
 
