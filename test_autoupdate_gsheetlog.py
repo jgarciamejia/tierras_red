@@ -71,11 +71,8 @@ def main():
             continue
         row = row[0] + 1
 
-        flist = os.listdir(datepath)
-        if not flist:
-            update_google_sheet(sheet, row, col2, 'No Observations Gathered')
-            update_google_sheet(sheet, row, col3, '0')
-        else:
+        try:
+            flist = os.listdir(datepath)
             target_list = set(f.split('.')[2] for f in flist)
             if 'FLAT001' in target_list:
                 target_list = {t for t in target_list if not t.startswith('FLAT')}
@@ -87,6 +84,9 @@ def main():
             
             update_google_sheet(sheet, row, col2, targets_str)
             update_google_sheet(sheet, row, col3, nexps_str)
+        except FileNotFoundError:
+            update_google_sheet(sheet, row, col2, 'No Observations Gathered')
+            update_google_sheet(sheet, row, col3, '0')
         
         formatted_date2 = current_date.strftime("%Y.%m.%d")
         pattern = re.compile(r'^60log\.{}.[A-Za-z0-9]+\.shtml$'.format(formatted_date2))
