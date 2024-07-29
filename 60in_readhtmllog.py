@@ -48,7 +48,7 @@ sheet = gc.open('Tierras_Observing_Log').worksheet(str('2024'))  # TODO: automat
 gs_dates = sheet.col_values(1)
 
 # Fetch content of 60-in log tree link containing the names of all logs since 2016
-tree_url = 'http://linmax.sao.arizona.edu/60logs/'
+tree_url = 'https://linmax.sao.arizona.edu/60logs/'
 tree_response = requests.get(tree_url)
 
 if tree_response.status_code != 200:
@@ -64,7 +64,8 @@ else:
 
     # Catch up from a given date to today
     # Define the start date and the end date (today's date)
-    start_date = datetime(2024, 5, 25)
+    start_date = datetime(2024, 5, 23)
+    #end_date = datetime.now().date()
     end_date = datetime.now().date()
 
     # Initialize a list to store the dates

@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from oauth2client.service_account import ServiceAccountCredentials
 
+# Awaiting AColson's help with access to 60-in log from CF-managed machine to be able to use this script for 60-in info writing 
+
 def count_files_in_folder(folder_path):
     """Counts the number of files in a given folder."""
     return sum(os.path.isfile(os.path.join(folder_path, item)) for item in os.listdir(folder_path))
@@ -49,10 +51,10 @@ def main():
     sheet = gc.open('Tierras_Observing_Log').worksheet('2024')  # TODO: automate creation of new year log sheet!
     gs_dates = sheet.col_values(1)
     
-    tree_url = 'http://linmax.sao.arizona.edu/60logs/'
-    log_links = fetch_log_links(tree_url)
+    #tree_url = 'http://linmax.sao.arizona.edu/60logs/'
+    #log_links = fetch_log_links(tree_url)
     
-    start_date = datetime(2024, 5, 25)
+    start_date = datetime(2024, 7, 21)
     end_date = datetime.now().date()
     
     current_date = start_date
@@ -90,16 +92,16 @@ def main():
         
         formatted_date2 = current_date.strftime("%Y.%m.%d")
         pattern = re.compile(r'^60log\.{}.[A-Za-z0-9]+\.shtml$'.format(formatted_date2))
-        log_name = next((link.get('href') for link in log_links if link.get('href') and pattern.match(link.get('href'))), None)
+        #log_name = next((link.get('href') for link in log_links if link.get('href') and pattern.match(link.get('href'))), None)
         
-        if log_name:
-            log_url = f"http://linmax.sao.arizona.edu/60logs/{log_name}"
-            log_response = requests.get(log_url)
-            if log_response.status_code == 200:
-                log_content = log_response.text
-                found_hours = [float(match) for match in re.findall(r'HOURS OBSERVED -- (\d{1,2}(?:\.\d{1,2})?)', log_content) if 0 <= float(match) <= 24]
-                if found_hours:
-                    update_google_sheet(sheet, row, col4, found_hours[0])
+        #if log_name:
+        #    log_url = f"http://linmax.sao.arizona.edu/60logs/{log_name}"
+        #    log_response = requests.get(log_url)
+        #    if log_response.status_code == 200:
+        #        log_content = log_response.text
+        #        found_hours = [float(match) for match in re.findall(r'HOURS OBSERVED -- (\d{1,2}(?:\.\d{1,2})?)', log_content) if 0 <= float(match) <= 24]
+        #        if found_hours:
+        #            update_google_sheet(sheet, row, col4, found_hours[0])
         
         current_date += timedelta(days=1)
 
