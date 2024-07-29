@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from oauth2client.service_account import ServiceAccountCredentials
 
-# Awaiting AColson's help with access to 60-in log from CF-managed machine to be able to use this script for 60-in info writing 
 
 def count_files_in_folder(folder_path):
     """Counts the number of files in a given folder."""
@@ -92,7 +91,7 @@ def main():
         pattern = re.compile(r'^60log\.{}.[A-Za-z0-9]+\.shtml$'.format(formatted_date2))
         log_name = next((link.get('href') for link in log_links if link.get('href') and pattern.match(link.get('href'))), None)
         
-        if log_name:
+        if log_name: #TODO: deal with case where there are several log files
            log_url = f"http://linmax.sao.arizona.edu/60logs/{log_name}"
            log_response = requests.get(log_url)
            if log_response.status_code == 200:
@@ -100,6 +99,7 @@ def main():
                found_hours = [float(match) for match in re.findall(r'HOURS OBSERVED -- (\d{1,2}(?:\.\d{1,2})?)', log_content) if 0 <= float(match) <= 24]
                if found_hours:
                    update_google_sheet(sheet, row, col4, found_hours[0])
+        
         
         current_date += timedelta(days=1)
 
