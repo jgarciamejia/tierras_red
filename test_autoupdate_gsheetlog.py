@@ -54,7 +54,7 @@ def main():
     tree_url = 'http://linmax.sao.arizona.edu/60logs/'
     log_links = fetch_log_links(tree_url)
     
-    start_date = datetime(2024, 7, 29) #YYYY,MM,DD
+    start_date = datetime(2024, 9, 20) #YYYY,MM,DD
     end_date = datetime.now().date()
     
     current_date = start_date
