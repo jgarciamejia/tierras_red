@@ -156,13 +156,13 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
 		INPUTS: 
-			file_list (array): list of paths to Tierras images. If no existing stacked image exists in the /data/tierras/targets/{field} directory, one will be made using images from this list
+			file_list (array): list of paths to Tierras images. If no existing stacked image exists in the /data/tierras/fields/{field} directory, one will be made using images from this list
 
 			target_position (tuple, optional): the user-specified target pixel position. If (0,0), the code will use the RA/Dec coordinates of the target in the header of the stacked field image and the associated WCS to estimate its position. 
 
 			plot (bool, optional): whether or not to produce/save plots of the selected reference stars in the field and a color-magnitude diagram
 
-			overwrite (bool, optional): whether or not to restore previously saved output from the /data/tierras/targets/{field}/ directory
+			overwrite (bool, optional): whether or not to restore previously saved output from the /data/tierras/fields/{field}/ directory
 
 			dimness_limit (float, optional): the minimum mean flux ratio in Gaia Rp-band that a candidate reference can have to the target and still be retained as a reference
 
@@ -213,6 +213,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 		central_im = hdul[0].data
 		header = hdul[0].header
 		wcs = WCS(header)
+
 	
 	if plot:
 		fig, ax = plot_image(central_im)
@@ -774,6 +775,8 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 
 	# reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
 
+	reference_image_hdu = fits.open('/data/tierras/fields/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
+
 	#reference_image_hdu = fits.open(file_list[1])[0]
 
 	# declare a circular footprint in case centroiding is performed
@@ -1231,6 +1234,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	return 
 
 
+
 def tierras_binner(t, y, bin_mins=15):
 	x_offset = t[0]
 	t = t - x_offset
@@ -1661,7 +1665,7 @@ def ap_range(file_list, targ_and_refs, overwrite=False, plots=False):
 		#bpm = load_bad_pixel_mask()
 
 		#load in the reference image 
-		reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
+		reference_image_hdu = fits.open('/data/tierras/fields/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
 
 		reference_image_header = reference_image_hdu.header
 		reference_wcs = WCS(reference_image_header)
