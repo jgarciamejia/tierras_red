@@ -180,11 +180,11 @@ def main():
         logging.info('Data reduction report emailed')
 
         # Send log file and STDRMS/NUMBRMS .pdf file to email
-        subject = '[Tierras]_Data_Reduction_Report:{}_{}'.format(date,target)
-        append = '{} {}'.format(logfile,histogram)
+        #subject = '[Tierras]_Data_Reduction_Report:{}_{}'.format(date,target)
+        #append = '{} {}'.format(logfile,histogram)
         #append = '{}'.format(histogram)
-        emails = 'juliana.garcia-mejia@cfa.harvard.edu patrick.tamburo@cfa.harvard.edu'
-        os.system('echo | mutt {} -s {} -a {}'.format(emails,subject,append))
+        #emails = 'juliana.garcia-mejia@cfa.harvard.edu patrick.tamburo@cfa.harvard.edu'
+        #os.system('echo | mutt {} -s {} -a {}'.format(emails,subject,append))
 
 if __name__ == '__main__':
     main()
