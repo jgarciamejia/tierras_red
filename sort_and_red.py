@@ -15,6 +15,7 @@ import numpy as np
 from scipy import stats
 from astropy.io import fits 
 import matplotlib.pyplot as plt
+from ap_phot import set_tierras_permissions
 
 from imred import *
 
@@ -74,6 +75,7 @@ logfile = os.path.join(ffolder,'{}.{}.redlog.txt'.format(date,target))
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
 logging.basicConfig(filename=logfile, level=logging.INFO)
+set_tierras_permissions(logfile)
 
 # Get list of files to be reduced
 filelist = make_filelist(ipath,date,target)
@@ -89,6 +91,7 @@ for ifile,filename in enumerate(filelist):
     rfilename = re.sub('\.fit','',basename)+'_red.fit'
     rfilename = os.path.join(ffolder,rfilename)
     ohl.writeto(rfilename,overwrite=True)
+    set_tierras_permissions(rfilename)
     rfilelist.append(rfilename)
     logging.info(filename+ " -> " +rfilename)
 
@@ -141,11 +144,13 @@ if len(badfiles) >= 1:
 elif len(badfiles) == 0:
     logging.info('No files were flagged.')
 np.savetxt(os.path.join(ffolder,'{}.{}.flagged_files.txt'.format(date,target)),np.unique(badfiles),fmt='%s')
+set_tierras_permissions(os.path.join(ffolder,'{}.{}.flagged_files.txt'.format(date,target)))
 
 # Make excluded directory and move flagged files there
 excfolder = os.path.join(ffolder,'excluded/')
 logging.info(excfolder)
 os.system('mkdir '+excfolder)
+set_tierras_permissions(excfolder)
 for badfile in badfiles:
     os.system('mv ' + badfile + ' '+ excfolder)
 
@@ -162,6 +167,7 @@ ax2.set_ylabel('Number of Exposures')
 ax2.set_xlabel('Number of astrometric standards used')
 histogram = os.path.join(ffolder,"{}.{}_astrom_hist.pdf".format(date,target))
 fig.savefig(histogram)
+set_tierras_permissions(histogram)
 logging.info('Saved two histograms summarizing the astrometric solution.')
 
 # Send log file and STDRMS/NUMBRMS .pdf file to email
