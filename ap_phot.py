@@ -775,8 +775,6 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 
 	# reference_image_hdu = fits.open('/data/tierras/targets/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
 
-	reference_image_hdu = fits.open('/data/tierras/fields/'+target+'/'+target+'_stacked_image.fits')[0] #TODO: should match image from target/reference csv file, and that should be loaded automatically.
-
 	#reference_image_hdu = fits.open(file_list[1])[0]
 
 	# declare a circular footprint in case centroiding is performed
