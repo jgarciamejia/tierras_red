@@ -423,7 +423,6 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	set_tierras_permissions(source_path)
 
 	logger.debug(f'Saved source csv to {source_path}')
-	# breakpoint() 
 	return output_df
 
 def load_bad_pixel_mask():
@@ -1209,12 +1208,14 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		output_path = Path('/data/tierras/photometry/'+date+'/'+target+'/'+ffname+f'/{date}_{target}_circular_{phot_type}_ap_phot_{ap_radii[i]}.parquet')
 		names = ['Aperture Radius', 'Inner Annulus Radius', 'Outer Annulus Radius']
 		data = [np.round(source_radii[i], 1), np.round(an_in_radii[i], 1), np.round(an_out_radii[i], 1)]
+	
 		for j in range(n_sources):
 			source_name = f'S{j}'
 			names.extend([source_name+' X', source_name+' Y', source_name+' Source-Sky', source_name+' Source-Sky Err', source_name+' Sky', source_name+' NL Flag', source_name+' Sat Flag'])
 			data.extend([np.round(source_x[j], 2), np.round(source_y[j], 2), np.round(source_minus_sky_ADU[i,j],4), np.round(source_minus_sky_err_ADU[i,j],4), np.round(source_sky_ADU[j],2), non_linear_flags[i,j], saturated_flags[i,j]])
 
 		tab = pa.Table.from_arrays(data, names)
+
 		
 		if not os.path.exists(output_path.parent.parent):
 			os.mkdir(output_path.parent.parent)
@@ -1222,6 +1223,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		if not os.path.exists(output_path.parent):
 			os.mkdir(output_path.parent)
 			set_tierras_permissions(output_path.parent)
+		
 		pq.write_table(tab, output_path)
 		set_tierras_permissions(output_path)
 
