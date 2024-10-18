@@ -193,7 +193,11 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	central_decs = []
 	for ii in range(len(file_list)):
 		with fits.open(file_list[ii]) as hdul:
-			wcs = WCS(hdul[0].header)
+			header = hdul[0].header
+			wcs = WCS(header)
+		# EXCLUDE any images that have AGOFFX = AGOFFY = 0. This indicates that acquisition failed and we don't want these to bias the average pointing calculation.
+		if header['AGOFFX'] == 0 and header['AGOFFY'] == 0:
+			continue
 		im_shape = hdul[0].shape
 		sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
 		central_ras.append(sc.ra.value)
@@ -201,9 +205,9 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 
 	# do a 3-sigma clipping and take the mean of the ra/dec lists to represent the average field center over the night 	
 	v1, l1, h1 = sigmaclip(central_ras, 3, 3)
-	avg_central_ra = np.mean(v1)
+	avg_central_ra = np.median(v1)
 	v2, l2, h2 = sigmaclip(central_decs, 3, 3)
-	avg_central_dec = np.mean(v2)
+	avg_central_dec = np.median(v2)
 
 	logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
 
@@ -214,7 +218,6 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 		header = hdul[0].header
 		wcs = WCS(header)
 
-	
 	if plot:
 		fig, ax = plot_image(central_im)
 
@@ -325,7 +328,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	res['e_Hmag'] = twomass_res['e_Hmag'][idx_gaia]
 	res['Kmag'] = twomass_res['Kmag'][idx_gaia]
 	res['e_Kmag'] = twomass_res['e_Kmag'][idx_gaia]
-	
+		
 	# determine which chip the sources fall on 
 	# 0 = bottom, 1 = top 
 	chip_inds = np.zeros(len(res),dtype='int')
@@ -357,54 +360,9 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	res.remove_rows(bad_inds_half)
 	logger.debug(f'Removed {len(bad_inds_half)} sources that were too near the divide between the upper and lower detector halves.')
 
-	# # estimate contamination 
-	# inds_to_remove = []
-	# xx, yy = np.meshgrid(np.arange(-50, 50), np.arange(-50, 50)) # grid of pixels over which to simulate images
-	# seeing_fwhm = 3/.432 #pix, assume 3" seeing
-	# seeing_sigma = seeing_fwhm / (2*np.sqrt(2*np.log(2)))
-
-	# for i in range(len(res)):
-	# 	print(f'Estimating contamination for source {i+1} of {len(res)}')
-	# 	distances = ((res['X pix'][i]-res_full['X pix'])**2 + (res['Y pix'][i]-res_full['Y pix'])**2)**0.5
-	# 	nearby_inds = np.where(distances <= 100)[0]
-	# 	nearby_inds = nearby_inds[np.where(distances[nearby_inds]!=0)[0]]
-	# 	if len(nearby_inds) > 0:
-	# 		source_rp = res['phot_rp_mean_mag'][i]
-	# 		source_x = res['X pix'][i]
-	# 		source_y = res['Y pix'][i]
-	# 		nearby_rp = res_full['phot_rp_mean_mag'][nearby_inds]
-	# 		nearby_x = res_full['X pix'][nearby_inds] - source_x
-	# 		nearby_y = res_full['Y pix'][nearby_inds] - source_y 
-
-	# 		# model the source in question as a 2D gaussian
-	# 		source_model = Gaussian2D(x_mean=0, y_mean=0, amplitude=1/(2*np.pi*seeing_sigma**2), x_stddev=seeing_sigma, y_stddev=seeing_sigma)
-	# 		sim_img = source_model(xx, yy)
-
-	# 		# add in gaussian models for the nearby sources
-	# 		for jj in range(len(nearby_rp)):
-	# 			flux = 10**(-(nearby_rp[jj]-source_rp)/2.5)
-	# 			contaminant_model = Gaussian2D(x_mean=nearby_x[jj], y_mean=nearby_y[jj], amplitude=flux/(2*np.pi*seeing_sigma**2), x_stddev=seeing_sigma, y_stddev=seeing_sigma)
-	# 			contaminant = contaminant_model(xx,yy)
-	# 			sim_img += contaminant
-			
-	# 		# plt.figure()
-	# 		# plt.imshow(sim_img, origin='lower', norm=simple_norm(sim_img, min_percent=1, max_percent=80))
-			
-	# 		# estimate contamination by doing aperture photometry on the simulated image
-	# 		# if the measured flux exceeds 1 by a chosen threshold, record the source's index so it can be removed
-	# 		ap = CircularAperture((sim_img.shape[1]/2, sim_img.shape[0]/2), r=2*seeing_fwhm)
-	# 		phot_table = aperture_photometry(sim_img, ap)
-	# 		contamination = phot_table['aperture_sum'][0] - 1
-	# 		if contamination > contamination_limit:
-	# 			inds_to_remove.append([i])
-	# res.remove_rows(inds_to_remove)
-	
-	# logger.debug(f'Removed {len(inds_to_remove)} sources with a contamination estimate greater than {contamination_limit}.')
-
 	logger.info(f'Found {len(res)} sources!')
 	
 	if plot:
-		# ax.plot(all_field_sources['X pix'], all_field_sources['Y pix'], marker='x', ls='', color='tab:red')
 		ax.plot(res['X pix'], res['Y pix'], marker='x', ls='', color='tab:red')
 
 		fig1, ax1 = plt.subplots(1,1,figsize=(6,5))
@@ -414,8 +372,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 		ax1.set_ylabel('M$_{G}$', fontsize=14)
 		ax1.tick_params(labelsize=12)
 		plt.tight_layout()
-
-	
+		breakpoint()	
 	# create the output dataframe consisting of the target as the 0th entry and the reference stars
 	output_table = copy.deepcopy(res)
 
