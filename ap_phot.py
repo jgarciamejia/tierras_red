@@ -191,6 +191,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	# use the wcs to evaluate the coordinates of the central pixel in images over the night to determine average pointing
 	central_ras = []
 	central_decs = []
+	ag_files = []
 	for ii in range(len(file_list)):
 		with fits.open(file_list[ii]) as hdul:
 			header = hdul[0].header
@@ -202,7 +203,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 		sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
 		central_ras.append(sc.ra.value)
 		central_decs.append(sc.dec.value)
-
+		ag_files.append(file_list[ii])
 	# do a 3-sigma clipping and take the mean of the ra/dec lists to represent the average field center over the night 	
 	v1, l1, h1 = sigmaclip(central_ras, 3, 3)
 	avg_central_ra = np.median(v1)
@@ -212,7 +213,7 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
 
 	# identify the image closest to the average position 
-	central_im_file = file_list[np.argmin(((avg_central_ra-central_ras)**2+(avg_central_dec-central_decs)**2)**0.5)]
+	central_im_file = ag_files[np.argmin(((avg_central_ra-central_ras)**2+(avg_central_dec-central_decs)**2)**0.5)]
 	with fits.open(central_im_file) as hdul:
 		central_im = hdul[0].data
 		header = hdul[0].header
