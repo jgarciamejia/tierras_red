@@ -59,6 +59,7 @@ from etc_pat import etc
 from astropy.modeling.functional_models import Gaussian2D, Gaussian1D
 import pyarrow as pa 
 import pyarrow.parquet as pq 
+from astroquery.simbad import Simbad
 # from fwhm import *
 
 # Suppress all Astropy warnings
@@ -329,7 +330,28 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	res['e_Hmag'] = twomass_res['e_Hmag'][idx_gaia]
 	res['Kmag'] = twomass_res['Kmag'][idx_gaia]
 	res['e_Kmag'] = twomass_res['e_Kmag'][idx_gaia]
-		
+
+	# check on the target and make sure it has a proper motion from Gaia 
+	hdr = fits.open(file_list[-1])[0].header
+	targ_x = hdr['CAT-X']
+	targ_y = hdr['CAT-Y']
+	closest_source = np.argmin(np.sqrt((res['X pix']-targ_x)**2 + (res['Y pix']-targ_y)**2))
+	if np.isnan(res['pmra'][closest_source]) or np.isnan(res['pmdec'][closest_source]):
+		logger.info('WARNING: The closest source to the CAT-X/Y position lacks proper motion measurements in Gaia DR3. Attempting to find them on Simbad.')
+		simbad = Simbad()
+		simbad.add_votable_fields("mespm", "otype")
+		try:
+			simbad_res = simbad.query_object(f'Gaia DR3 {res["source_id"][closest_source]}')
+			res['pmra'][closest_source] = simbad_res['PM_pmra'][0]
+			res['pmdec'][closest_source] = simbad_res['PM_pmde'][0]
+			gaia_coord = SkyCoord(ra=res['ra'][closest_source]*u.deg, dec=res['dec'][closest_source]*u.deg, pm_ra_cosdec=res['pmra'][closest_source]*u.mas/u.yr, pm_dec=res['pmdec'][closest_source]*u.mas/u.yr, obstime=Time('2016',format='decimalyear'))
+			gaia_coord_tierras_epoch = gaia_coord.apply_space_motion(tierras_epoch)
+			tierras_pixel_coord = wcs.world_to_pixel(gaia_coord_tierras_epoch)
+			res['X pix'][closest_source] = tierras_pixel_coord[0]
+			res['Y pix'][closest_source] = tierras_pixel_coord[1]
+		except:
+			logger.info('ERROR: Simbad query failed. Expected source coordinates in Tierras data may be innacurate.')
+
 	# determine which chip the sources fall on 
 	# 0 = bottom, 1 = top 
 	chip_inds = np.zeros(len(res),dtype='int')
