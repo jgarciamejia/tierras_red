@@ -349,6 +349,8 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 			tierras_pixel_coord = wcs.world_to_pixel(gaia_coord_tierras_epoch)
 			res['X pix'][closest_source] = tierras_pixel_coord[0]
 			res['Y pix'][closest_source] = tierras_pixel_coord[1]
+			res['ra_tierras'][closest_source] = gaia_coord_tierras_epoch.ra.value
+			res['dec_tierras'][closest_source] = gaia_coord_tierras_epoch.dec.value
 		except:
 			logger.info('ERROR: Simbad query failed. Expected source coordinates in Tierras data may be innacurate.')
 
@@ -929,7 +931,6 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		# fig2, ax2 = plot_image(source_data)
 		# for j in range(len(source_x[:,i])):
 		# 	ax2.plot(source_x[j,i],source_y[j,i],'rx')
-		# breakpoint()
 
 		source_positions = [(source_x[j,i], source_y[j,i]) for j in range(n_sources)]
 
