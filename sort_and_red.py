@@ -178,4 +178,4 @@ logging.info('Saved two histograms summarizing the astrometric solution.')
 #os.system('echo | mutt {} -s {} -a {}'.format(emails,subject,append))
 
 print ('Data reduction done.')
-print ('Data reduction report sent to {}'.format(emails))
+# print ('Data reduction report sent to {}'.format(emails))
