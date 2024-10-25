@@ -206,9 +206,9 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 		central_decs.append(sc.dec.value)
 		ag_files.append(file_list[ii])
 	# do a 3-sigma clipping and take the mean of the ra/dec lists to represent the average field center over the night 	
-	v1, l1, h1 = sigmaclip(central_ras, 3, 3)
+	v1, l1, h1 = sigmaclip(central_ras, 2, 2)
 	avg_central_ra = np.median(v1)
-	v2, l2, h2 = sigmaclip(central_decs, 3, 3)
+	v2, l2, h2 = sigmaclip(central_decs, 2, 2)
 	avg_central_dec = np.median(v2)
 
 	logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
