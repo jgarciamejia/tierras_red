@@ -206,12 +206,13 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 		central_decs.append(sc.dec.value)
 		ag_files.append(file_list[ii])
 	# do a 3-sigma clipping and take the mean of the ra/dec lists to represent the average field center over the night 	
-	v1, l1, h1 = sigmaclip(central_ras, 2, 2)
+	v1, l1, h1 = sigmaclip(central_ras, 1, 1)
 	avg_central_ra = np.median(v1)
-	v2, l2, h2 = sigmaclip(central_decs, 2, 2)
+	v2, l2, h2 = sigmaclip(central_decs, 1, 1)
 	avg_central_dec = np.median(v2)
 
 	logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
+
 
 	# identify the image closest to the average position 
 	central_im_file = ag_files[np.argmin(((avg_central_ra-central_ras)**2+(avg_central_dec-central_decs)**2)**0.5)]
@@ -2465,6 +2466,7 @@ def main(raw_args=None):
 	ap.add_argument("-interpolate_cosmics",required=False,default=False,help="Whether or not to identify and interpolate cosmic ray hits (not working at present!)")
 	ap.add_argument("-rp_mag_limit", required=False, default=17, type=float, help="Gaia Rp magnitude limit for source identification.")
 	ap.add_argument("-phot_type", required=False, default='fixed', type=str, help="'fixed' or 'variable'. Determines whether photometry is performed with fixed apertures or with apertures that vary with the measured seeing FWHM.")
+	ap.add_argument("-plot_source_detection", required=False, default=False, help="Whether or not to generate a plot of the sources returned from source_selection.")
 	args = ap.parse_args(raw_args)
 
 	#Access observation info
@@ -2480,6 +2482,7 @@ def main(raw_args=None):
 	edge_limit = args.edge_limit
 	centroid = t_or_f(args.centroid)
 	interpolate_cosmics = t_or_f(args.interpolate_cosmics)
+	plot_source_detection = t_or_f(args.plot_source_detection)
 	centroid_type = args.centroid_type
 	rp_mag_limit = args.rp_mag_limit
 	phot_type = args.phot_type
@@ -2518,7 +2521,7 @@ def main(raw_args=None):
 	flattened_files = get_flattened_files(date, target, ffname)
 
 	# identify sources in the field 
-	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=False, overwrite=True, rp_mag_limit=rp_mag_limit)
+	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=plot_source_detection, overwrite=True, rp_mag_limit=rp_mag_limit)
 
 	# measure fwhm on grid of stars spread across the images
 	measure_fwhm_grid(date, target, ffname, sources)
