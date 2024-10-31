@@ -10,6 +10,7 @@ from fitsutil import *
 from scipy.spatial import cKDTree
 import pickle 
 import os 
+from ap_phot import set_tierras_permissions
 
 def process_extension(imp, iext):
 	hdr = imp.header
@@ -72,50 +73,36 @@ def main(raw_args=None):
 		pickle.dump((pixel_coords, nearest_indices.astype('int32')), open(nearest_indices_file, 'wb')) # save indices to disk for faster processing in future
 	else:
 		# if the pre-computed neighbor indices have already been saved to disk, restore them
-		print(f'Restoring pre-computed nearest {k-1} pixels at each pixel location.')
+		print(f'Restoring pre-computed {k-1}-pixel neighborhoods for each pixel location.')
 		pixel_coords, nearest_indices = pickle.load(open(nearest_indices_file, 'rb'))
 
+	combined_images = []
 	avg_images = []
-	for i in range(n_files):
-		print(f'Doing {flat_files[i]} ({i+1} of {n_files})')
+	#for i in range(n_files):
+	for i, filename in enumerate(flat_files):
+		print(f'Doing {filename} ({i+1} of {n_files})')
+
+		with fits.open(filename) as ifp:
+			proc_imgs = [process_extension(ifp[j], j) for j in range(1, 3)]
 		
-		ifp = fplist[i]
+		combined_img = np.concatenate(proc_imgs, axis=0)
+		combined_images.append(combined_img)
 
-
-		proc_imgs = []
-		for j in range(1,3):
-			imp = ifp[j]
-			proc_imgs.append(process_extension(imp, j))
-
-		combined_img = np.zeros((im_shape))
-		combined_img[0:1024, :] = proc_imgs[0]
-		combined_img[1024:, :] = proc_imgs[1]
-
-		avg_img = np.zeros_like(combined_img)
-		fig, ax = plt.subplots(2,1,figsize=(12,7), sharex=True, sharey=True)
-		norm = simple_norm(combined_img, min_percent=5, max_percent=98)
-		for j in range(len(pixel_coords)):
-			target_coord = pixel_coords[j]
-			neighbors = pixel_coords[nearest_indices[j]]
-		
-			avg_neighbors = np.mean(combined_img[neighbors[:,1], neighbors[:,0]])
-			avg_img[target_coord[1], target_coord[0]] = combined_img[target_coord[1], target_coord[0]] / avg_neighbors
-			
-			# if j % 100000 == 0 and j != 0: 
-			# 	ax[0].imshow(combined_img, origin='lower', norm=norm, interpolation='none')
-			# 	ax[0].plot(target_coord[0], target_coord[1], 'bx')
-			# 	for j in range(len(neighbors)):
-			# 		ax[0].plot(neighbors[j][0], neighbors[j][1], 'rx')
-				
-			# 	norm2 = simple_norm(avg_img, min_percent=1, max_percent=98)
-			# 	ax[1].imshow(avg_img, origin='lower', norm=norm2, interpolation='none')
-			# 	plt.tight_layout()
-			# 	breakpoint()
-			# 	ax[0].cla()
-			# 	ax[1].cla()
-			avg_images.append(avg_img)
+		# divide each pixel in the combined image by the mean of its 50 neighbors 
+		neighbor_yx = pixel_coords[nearest_indices]  # This will be a (8388608, 50, 2) array with y, x coordinates
+		neighbor_data = combined_img[neighbor_yx[:, :, 1], neighbor_yx[:, :, 0]]  # Now (8388608, 50) array with pixel values
+		avg_neighbors = np.median(neighbor_data, axis=1).reshape(im_shape)
+		avg_img = np.divide(combined_img, avg_neighbors, out=np.zeros_like(combined_img), where=avg_neighbors != 0)			
+		avg_images.append(avg_img)
 	
-	breakpoint()
+	print('Median-combining the glow-filtered flats...')
+	# save the median image and stddev images to /data/tierras/flats/
+	median_image = np.median(np.dstack(avg_images), axis=2) # the median-combined image (across the flat sequence)
+	stddev_image = np.std(np.dstack(avg_images), axis=2) # the standard deviation image (across the flat sequence)
+	output_path = f'/data/tierras/flats/{date}_FLAT.fit'
+	output_hdul = fits.HDUList([fits.PrimaryHDU(data=median_image), fits.ImageHDU(data=stddev_image)])
+	output_hdul.writeto(output_path)
+	set_tierras_permissions(output_path)
 	return 
 
 if __name__ == '__main__':
