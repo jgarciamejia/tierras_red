@@ -179,6 +179,10 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 	'''
 	
 	# write out the source csv file
+	if len(file_list) == 0:
+		logger.info(f'No files in file list, returning.')
+		return None
+
 	date = file_list[0].parent.parent.parent.name 
 	target = file_list[0].parent.parent.name 
 	ffname = file_list[0].parent.name 
@@ -2523,6 +2527,10 @@ def main(raw_args=None):
 	# identify sources in the field 
 	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=plot_source_detection, overwrite=True, rp_mag_limit=rp_mag_limit)
 
+	if sources is None or len(sources) == 0:
+		logger.info('No sources found, returning.')
+		return 
+	
 	# measure fwhm on grid of stars spread across the images
 	measure_fwhm_grid(date, target, ffname, sources)
 
