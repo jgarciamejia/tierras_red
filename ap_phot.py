@@ -74,23 +74,23 @@ def get_median_field_pointing(target):
 	pscale = 0.432
 	pscale_deg = pscale/3600
 	for i in range(len(file_paths)):
-		hdul = fits.open(file_paths[i])
-		header = hdul[0].header
-		# ignore files with AGOFFX/Y = 0; these correspond to images where the acquire sequence failed
-		if header['AGOFFX'] != 0 and header['AGOFFY'] != 0:
-			wcs = WCS(header)
-			sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
-			ras.append(sc.ra.value)
-			decs.append(sc.dec.value)
-			median_ra_loop = np.median(ras)
-			median_dec_loop = np.median(decs)
-			# allow the calculation to terminate early if the median ra and dec have converged to within a tenth of a pixel from their values the previous loop AND we've looked at at least 20 files
-			if abs(median_ra_loop - median_ra) < pscale_deg/10 and abs(median_dec_loop - median_dec) < pscale_deg/10 and i >= 20:
+		with fits.open(file_paths[i]) as hdul:
+			header = hdul[0].header
+			# ignore files with AGOFFX/Y = 0; these correspond to images where the acquire sequence failed
+			if header['AGOFFX'] != 0 and header['AGOFFY'] != 0:
+				wcs = WCS(header)
+				sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
+				ras.append(sc.ra.value)
+				decs.append(sc.dec.value)
+				median_ra_loop = np.median(ras)
+				median_dec_loop = np.median(decs)
+				# allow the calculation to terminate early if the median ra and dec have converged to within a tenth of a pixel from their values the previous loop AND we've looked at at least 20 files
+				if abs(median_ra_loop - median_ra) < pscale_deg/10 and abs(median_dec_loop - median_dec) < pscale_deg/10 and i >= 20:
+					median_ra = median_ra_loop
+					median_dec = median_dec_loop
+					break
 				median_ra = median_ra_loop
 				median_dec = median_dec_loop
-				break
-			median_ra = median_ra_loop
-			median_dec = median_dec_loop
 			
 	return median_ra, median_dec
 
@@ -207,9 +207,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 
 	'''
 	
-	# write out the source csv file
 	if len(file_list) == 0:
-		logger.info(f'No files in file list, returning.')
 		return None
 
 	date = file_list[0].parent.parent.parent.name 
@@ -2540,7 +2538,7 @@ def main(raw_args=None):
 	centroid_type = args.centroid_type
 	rp_mag_limit = args.rp_mag_limit
 	phot_type = args.phot_type
-
+	
 	# set up the directories for storing photometry data 
 	make_data_dirs(date, target, ffname)
 
@@ -2580,7 +2578,14 @@ def main(raw_args=None):
 	sources = source_selection(flattened_files, logger, ra=median_ra, dec=median_dec, edge_limit=edge_limit, plot=plot_source_detection, overwrite=True, rp_mag_limit=rp_mag_limit)
 
 	if sources is None or len(sources) == 0:
-		logger.info('No sources found, returning.')
+		logger.info('No sources found, returning.')		
+		# close the logger
+		for handler in logger.handlers:
+			handler.close()
+			logger.removeHandler(handler)
+		logging.shutdown()
+		# delete the photometry directory since there will be nothing there
+		os.system(f'rm -rf /data/tierras/photometry/{date}/{target}/')
 		return 
 	
 	# measure fwhm on grid of stars spread across the images
