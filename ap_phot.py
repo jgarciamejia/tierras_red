@@ -65,6 +65,35 @@ from astroquery.simbad import Simbad
 # Suppress all Astropy warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="astropy")
 
+def get_median_field_pointing(target):
+	file_paths = sorted(glob(f'/data/tierras/flattened/*/{target}/flat*/*_red.fit'))
+	ras, decs = [], []
+	im_shape = (2048, 4096)
+	median_ra = 0
+	median_dec = 0 
+	pscale = 0.432
+	pscale_deg = pscale/3600
+	for i in range(len(file_paths)):
+		hdul = fits.open(file_paths[i])
+		header = hdul[0].header
+		# ignore files with AGOFFX/Y = 0; these correspond to images where the acquire sequence failed
+		if header['AGOFFX'] != 0 and header['AGOFFY'] != 0:
+			wcs = WCS(header)
+			sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
+			ras.append(sc.ra.value)
+			decs.append(sc.dec.value)
+			median_ra_loop = np.median(ras)
+			median_dec_loop = np.median(decs)
+			# allow the calculation to terminate early if the median ra and dec have converged to within a tenth of a pixel from their values the previous loop AND we've looked at at least 20 files
+			if abs(median_ra_loop - median_ra) < pscale_deg/10 and abs(median_dec_loop - median_dec) < pscale_deg/10 and i >= 20:
+				median_ra = median_ra_loop
+				median_dec = median_dec_loop
+				break
+			median_ra = median_ra_loop
+			median_dec = median_dec_loop
+			
+	return median_ra, median_dec
+
 def get_flattened_files(date, target, ffname):
 	#Get a list of data files sorted by exposure number
 	'''
@@ -153,7 +182,7 @@ def plot_image(data,use_wcs=False,cmap_name='viridis'):
 	plt.tight_layout()
 	return fig, ax
 
-def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01, rp_mag_limit=17):	
+def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01, rp_mag_limit=17):	
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
 		INPUTS: 
@@ -193,27 +222,48 @@ def source_selection(file_list, logger, min_snr=10, edge_limit=20, plot=False, p
 		source_df = pd.read_csv(source_path)
 		return source_df
 
-	# use the wcs to evaluate the coordinates of the central pixel in images over the night to determine average pointing
-	central_ras = []
-	central_decs = []
-	ag_files = []
-	for ii in range(len(file_list)):
-		with fits.open(file_list[ii]) as hdul:
-			header = hdul[0].header
+	if ra is None and dec is None:
+		# If no field ra/dec were passed, use the wcs to evaluate the coordinates of the central pixel in images over the night to determine average pointing
+		central_ras = []
+		central_decs = []
+		ag_files = []
+		for ii in range(len(file_list)):
+			with fits.open(file_list[ii]) as hdul:
+				header = hdul[0].header
+				wcs = WCS(header)
+			# EXCLUDE any images that have AGOFFX = AGOFFY = 0. This indicates that acquisition failed and we don't want these to bias the average pointing calculation.
+			if header['AGOFFX'] == 0 and header['AGOFFY'] == 0:
+				continue
+			im_shape = hdul[0].shape
+			sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
+			central_ras.append(sc.ra.value)
+			central_decs.append(sc.dec.value)
+			ag_files.append(file_list[ii])
+
+		# do a sigma clipping and take the median of the ra/dec lists to represent the average field center over the night 	
+		v1, l1, h1 = sigmaclip(central_ras, 1, 1)
+		avg_central_ra = np.median(v1)
+		v2, l2, h2 = sigmaclip(central_decs, 1, 1)
+		avg_central_dec = np.median(v2)
+
+	else: 
+		avg_central_ra = ra 
+		avg_central_dec = dec 
+		ag_files = []
+		central_ras = []
+		central_decs = []
+		for ii in range(len(file_list)):
+			with fits.open(file_list[ii]) as hdul:
+				header = hdul[0].header
+			# EXCLUDE any images that have AGOFFX = AGOFFY = 0. This indicates that acquisition failed and we don't want these to bias the average pointing calculation.
+			if header['AGOFFX'] == 0 and header['AGOFFY'] == 0:
+				continue
 			wcs = WCS(header)
-		# EXCLUDE any images that have AGOFFX = AGOFFY = 0. This indicates that acquisition failed and we don't want these to bias the average pointing calculation.
-		if header['AGOFFX'] == 0 and header['AGOFFY'] == 0:
-			continue
-		im_shape = hdul[0].shape
-		sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
-		central_ras.append(sc.ra.value)
-		central_decs.append(sc.dec.value)
-		ag_files.append(file_list[ii])
-	# do a 3-sigma clipping and take the mean of the ra/dec lists to represent the average field center over the night 	
-	v1, l1, h1 = sigmaclip(central_ras, 1, 1)
-	avg_central_ra = np.median(v1)
-	v2, l2, h2 = sigmaclip(central_decs, 1, 1)
-	avg_central_dec = np.median(v2)
+			im_shape = hdul[0].shape
+			sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
+			central_ras.append(sc.ra.value)
+			central_decs.append(sc.dec.value)
+			ag_files.append(file_list[ii])
 
 	logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
 
@@ -2524,8 +2574,10 @@ def main(raw_args=None):
 	#Get paths to the reduced data for this night/target/ffname
 	flattened_files = get_flattened_files(date, target, ffname)
 
+	median_ra, median_dec = get_median_field_pointing(target)
+
 	# identify sources in the field 
-	sources = source_selection(flattened_files, logger, edge_limit=edge_limit, plot=plot_source_detection, overwrite=True, rp_mag_limit=rp_mag_limit)
+	sources = source_selection(flattened_files, logger, ra=median_ra, dec=median_dec, edge_limit=edge_limit, plot=plot_source_detection, overwrite=True, rp_mag_limit=rp_mag_limit)
 
 	if sources is None or len(sources) == 0:
 		logger.info('No sources found, returning.')
