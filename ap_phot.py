@@ -836,8 +836,8 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		GAIN = source_header['GAIN'] #e- ADU^-1
 		READ_NOISE = source_header['READNOIS'] #e-
 		EXPTIME = source_header['EXPTIME']
-		RA = source_header['RA']
-		DEC = source_header['DEC']
+		RA = source_header['AIM-RA']
+		DEC = source_header['AIM-DEC']
 
 		v_dark = DARK_CURRENT*EXPTIME 
 		v_read = READ_NOISE**2 
