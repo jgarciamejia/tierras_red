@@ -215,22 +215,19 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	ffname = file_list[0].parent.name 
 	source_path = f'/data/tierras/photometry/{date}/{target}/{ffname}/{date}_{target}_sources.csv'
 
-	if os.path.exists(source_path) and not overwrite:
-		logger.info(f'Restoring existing sources from {source_path}.')
-		source_df = pd.read_csv(source_path)
-		return source_df
-
 	if ra is None and dec is None:
 		# If no field ra/dec were passed, use the wcs to evaluate the coordinates of the central pixel in images over the night to determine average pointing
 		central_ras = []
 		central_decs = []
 		ag_files = []
+		bad_ag_files = 0
 		for ii in range(len(file_list)):
 			with fits.open(file_list[ii]) as hdul:
 				header = hdul[0].header
 				wcs = WCS(header)
 			# EXCLUDE any images that have AGOFFX = AGOFFY = 0. This indicates that acquisition failed and we don't want these to bias the average pointing calculation.
 			if header['AGOFFX'] == 0 and header['AGOFFY'] == 0:
+				bad_ag_files += 1
 				continue
 			im_shape = hdul[0].shape
 			sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
@@ -250,11 +247,13 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 		ag_files = []
 		central_ras = []
 		central_decs = []
+		bad_ag_files = 0 
 		for ii in range(len(file_list)):
 			with fits.open(file_list[ii]) as hdul:
 				header = hdul[0].header
 			# EXCLUDE any images that have AGOFFX = AGOFFY = 0. This indicates that acquisition failed and we don't want these to bias the average pointing calculation.
 			if header['AGOFFX'] == 0 and header['AGOFFY'] == 0:
+				bad_ag_files += 1 
 				continue
 			wcs = WCS(header)
 			im_shape = hdul[0].shape
@@ -263,10 +262,19 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 			central_decs.append(sc.dec.value)
 			ag_files.append(file_list[ii])
 
+	# some nights are full of only bad guiding images; skip them by returning None here
+	if len(file_list) == bad_ag_files:
+		logging.info('No exposures with successful acquisition! Returning.')
+		return None
+	
 	logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
 
-
-	# identify the image closest to the average position 
+	if os.path.exists(source_path) and not overwrite:
+		logger.info(f'Restoring existing sources from {source_path}.')
+		source_df = pd.read_csv(source_path)
+		return source_df
+	
+	# identify the image closest to the average position
 	central_im_file = ag_files[np.argmin(((avg_central_ra-central_ras)**2+(avg_central_dec-central_decs)**2)**0.5)]
 	with fits.open(central_im_file) as hdul:
 		central_im = hdul[0].data
