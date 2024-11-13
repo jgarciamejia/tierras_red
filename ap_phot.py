@@ -207,6 +207,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 
 	'''
 	
+
 	if len(file_list) == 0:
 		return None
 
@@ -214,6 +215,11 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	target = file_list[0].parent.parent.name 
 	ffname = file_list[0].parent.name 
 	source_path = f'/data/tierras/photometry/{date}/{target}/{ffname}/{date}_{target}_sources.csv'
+
+	if os.path.exists(source_path) and not overwrite:
+		logger.info(f'Restoring existing sources from {source_path}.')
+		source_df = pd.read_csv(source_path)
+		return source_df
 
 	if ra is None and dec is None:
 		# If no field ra/dec were passed, use the wcs to evaluate the coordinates of the central pixel in images over the night to determine average pointing
@@ -267,15 +273,16 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 		logging.info('No exposures with successful acquisition! Returning.')
 		return None
 	
+	# identify the image closest to the average position
+	im_distances = np.sqrt((avg_central_ra-central_ras)**2 + (avg_central_dec-central_decs)**2)
+	if min(im_distances*60*60/plate_scale) > 100:
+		logger.info(f'Image closest to field center is off by more than 100 pixels, returning.')
+		return None
+
 	logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
 
-	if os.path.exists(source_path) and not overwrite:
-		logger.info(f'Restoring existing sources from {source_path}.')
-		source_df = pd.read_csv(source_path)
-		return source_df
-	
-	# identify the image closest to the average position
-	central_im_file = ag_files[np.argmin(((avg_central_ra-central_ras)**2+(avg_central_dec-central_decs)**2)**0.5)]
+	central_im_file = ag_files[np.argmin(im_distances)]
+
 	with fits.open(central_im_file) as hdul:
 		central_im = hdul[0].data
 		header = hdul[0].header
