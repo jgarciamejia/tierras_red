@@ -207,7 +207,6 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 
 	'''
 	
-
 	if len(file_list) == 0:
 		return None
 
@@ -258,9 +257,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 			with fits.open(file_list[ii]) as hdul:
 				header = hdul[0].header
 			# EXCLUDE any images that have AGOFFX = AGOFFY = 0. This indicates that acquisition failed and we don't want these to bias the average pointing calculation.
-			if header['AGOFFX'] == 0 and header['AGOFFY'] == 0:
-				bad_ag_files += 1 
-				continue
+
 			wcs = WCS(header)
 			im_shape = hdul[0].shape
 			sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
@@ -273,7 +270,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 		logging.info('No exposures with successful acquisition! Returning.')
 		return None
 	
-	# identify the image closest to the average position
+	# identify the image closest to the average position; if it's off by more than 100 pix from the average pointing, skip
 	im_distances = np.sqrt((avg_central_ra-central_ras)**2 + (avg_central_dec-central_decs)**2)
 	if min(im_distances*60*60/plate_scale) > 100:
 		logger.info(f'Image closest to field center is off by more than 100 pixels, returning.')
