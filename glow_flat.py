@@ -47,8 +47,8 @@ def process_extension(imp, iext):
 def main(raw_args=None):
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-date", required=True, help="Date of observation in YYYYMMDD format.")
-	ap.add_argument("-neighborhood_size", required=False, default=50, type=int, help='The number of pixels surrounding a given pixel to consider when correcting for glow.')
-	args = ap.parse_args()
+	ap.add_argument("-neighborhood_size", required=False, default=250, type=int, help='The number of pixels surrounding a given pixel to consider when correcting for glow.')
+	args = ap.parse_args(raw_args)
 	date = args.date
 	neighborhood_size = args.neighborhood_size
 	k = neighborhood_size+1
@@ -96,7 +96,7 @@ def main(raw_args=None):
 	# save the median image and stddev images to /data/tierras/flats/
 	median_image = np.median(avg_images, axis=0) # the median-combined image (across the flat sequence)
 	stddev_image = np.std(avg_images, axis=0) # the standard deviation image (across the flat sequence)
-	if neighborhood_size == 50:
+	if neighborhood_size == 250:
 		output_path = f'/data/tierras/flats/{date}_FLAT.fit'
 	else:
 		output_path = f'/data/tierras/flats/{date}_FLAT_{neighborhood_size}.fit'

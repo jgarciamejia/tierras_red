@@ -815,6 +815,14 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	bpm[0:25+1,:] = True
 	bpm[2048-1-25:,:] = True
 
+	
+	# add a mask to pixel edges, otherwise they can bias the background measurements for sources near the edges
+	edge_mask = np.ones_like(bpm)
+	edge_mask[:, 0:2] = 0
+	edge_mask[0:4, :] = 0
+	edge_mask[:, 4094:] = 0
+	edge_mask[2042:, :] = 0
+
 	if interpolate_cosmics:
 		from astroscrappy import detect_cosmics 
 		bp_inds = np.where(bpm == 1)
@@ -1050,10 +1058,18 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		# measure background
 		annuli = CircularAnnulus(source_positions, an_in, an_out)
 		annulus_masks = annuli.to_mask(method='center')
+
+		# apply the edge mask
+		masked_data = source_data * edge_mask
+
 		for j in range(len(annuli)):
-			source_sky_ADU[j,i] = np.mean(sigmaclip(annulus_masks[j].get_values(source_data),2,2)[0])
+			annulus_data = annulus_masks[j].get_values(masked_data) # ignore pixels that fall near edges, they can bias background estimation
+			annulus_data = annulus_data[annulus_data != 0]
+			source_sky_ADU[j,i] = np.mean(sigmaclip(annulus_data,2,2)[0])
 		logger.debug(f'Bkg loop time: {time.time()-tbkg:.2f} s')
-		
+
+		# edge_source_inds = np.where((source_x[:,i] < 30) | (source_x[:,i] > 4095-30) | (source_y[:,i] < 30) | (source_y[:,i] > 2047-30))[0]
+		# breakpoint()	
 
 		tphot = time.time()
 		# do photometry on the *sources*
