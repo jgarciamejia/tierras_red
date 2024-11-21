@@ -8,11 +8,8 @@ from glob import glob
 import lfa 
 from fitsutil import * 
 from scipy.spatial import KDTree
-import pickle 
-import os 
 from ap_phot import set_tierras_permissions
-from scipy.spatial import distance_matrix
-from scipy.ndimage import median_filter
+from scipy.stats import sigmaclip
 
 def process_extension(imp, iext):
 	hdr = imp.header
@@ -53,7 +50,7 @@ def main(raw_args=None):
 	neighborhood_size = args.neighborhood_size
 	k = neighborhood_size+1
 	path = f'/data/tierras/incoming/{date}/'
-	flat_files = sorted(glob(path+'*FLAT*.fit'))
+	flat_files = np.array(sorted(glob(path+'*FLAT*.fit')))
 	n_files = len(flat_files)
 	if n_files == 0:
 		print(f'No flat files found in /data/tierras/incoming/{date}/!')
@@ -76,6 +73,29 @@ def main(raw_args=None):
 		combined_images.append(combined_img)
 
 	combined_images = np.array(combined_images)
+	# loop over the combined flats and reject any that are significant flux outliers 
+	flat_medians = np.zeros(len(combined_images))
+	for i in range(len(combined_images)):
+		flat_medians[i] = np.median(combined_images[i])
+	
+	plt.figure() 
+	plt.hist(flat_medians)
+
+	v, l, h = sigmaclip(flat_medians, 5, 5) # do a 5-sigma outlier rejection
+
+	plt.axvline(l, color='tab:orange', ls='--')
+	plt.axvline(h, color='tab:orange', ls='--')
+	use_inds = np.where((flat_medians > l) & (flat_medians < h))[0]
+	print(f'Discarded {len(combined_images) - len(use_inds)} flats with 5-sigma median flux clipping. {len(use_inds)} flats will be combined.')
+
+	# breakpoint() 
+
+	# update arrays with use_inds 
+	n_files = len(use_inds)
+	flat_files = flat_files[use_inds]
+	combined_images = combined_images[use_inds]
+	flat_medians = flat_medians[use_inds] 
+
 	avg_images = np.zeros_like(combined_images)	
 
 	# construct the images corrected by the median of neighboring pixels
@@ -95,12 +115,27 @@ def main(raw_args=None):
 	print('Median-combining the glow-filtered flats...')
 	# save the median image and stddev images to /data/tierras/flats/
 	median_image = np.median(avg_images, axis=0) # the median-combined image (across the flat sequence)
-	stddev_image = np.std(avg_images, axis=0) # the standard deviation image (across the flat sequence)
+	# stddev_image = np.std(avg_images, axis=0) # the standard deviation image (across the flat sequence)
+	
+	# let's assumed 250-pixel neighborhood will be our standard. 
+	# if the neighborhood is different than 250, indicate it in the filename
 	if neighborhood_size == 250:
 		output_path = f'/data/tierras/flats/{date}_FLAT.fit'
 	else:
 		output_path = f'/data/tierras/flats/{date}_FLAT_{neighborhood_size}.fit'
-	output_hdul = fits.HDUList([fits.PrimaryHDU(data=median_image), fits.ImageHDU(data=stddev_image)])
+
+	# make a header to save some info about the flats that went into the combined flat
+	hdr = fits.Header()
+	hdr['COMMENT'] = f'Neighborhood size = {neighborhood_size} pixels'
+	hdr['COMMENT'] = f'N_flats = {n_files}'
+	hdr['COMMENT'] = f'Median illumiation = {np.median(flat_medians)} ADU'
+	hdr['COMMENT'] = 'Combined the following flats:'
+	for i in range(n_files):
+		hdr['COMMENT'] = flat_files[i]
+	
+	output_hdul = fits.HDUList([fits.PrimaryHDU(data=median_image, header=hdr)])
+
+	# record: n_flats, median pixel illumination, filepaths of flat files 
 	output_hdul.writeto(output_path)
 	set_tierras_permissions(output_path)
 	return 
