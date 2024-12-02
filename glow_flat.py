@@ -78,13 +78,13 @@ def main(raw_args=None):
 	for i in range(len(combined_images)):
 		flat_medians[i] = np.median(combined_images[i])
 	
-	plt.figure() 
-	plt.hist(flat_medians)
+	# plt.figure() 
+	# plt.hist(flat_medians)
 
 	v, l, h = sigmaclip(flat_medians, 5, 5) # do a 5-sigma outlier rejection
 
-	plt.axvline(l, color='tab:orange', ls='--')
-	plt.axvline(h, color='tab:orange', ls='--')
+	# plt.axvline(l, color='tab:orange', ls='--')
+	# plt.axvline(h, color='tab:orange', ls='--')
 	use_inds = np.where((flat_medians > l) & (flat_medians < h))[0]
 	print(f'Discarded {len(combined_images) - len(use_inds)} flats with 5-sigma median flux clipping. {len(use_inds)} flats will be combined.')
 
