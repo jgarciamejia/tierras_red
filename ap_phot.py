@@ -66,7 +66,7 @@ from astroquery.simbad import Simbad
 warnings.filterwarnings("ignore", category=UserWarning, module="astropy")
 
 def get_median_field_pointing(target):
-	file_paths = sorted(glob(f'/data/tierras/flattened/*/{target}/flat*/*_red.fit'))
+	file_paths = sorted(glob(f'/data/tierras/flattened/*/{target}/flat*/*_red.fit'))[::-1]
 	ras, decs = [], []
 	im_shape = (2048, 4096)
 	median_ra = 0
@@ -85,13 +85,13 @@ def get_median_field_pointing(target):
 				median_ra_loop = np.median(ras)
 				median_dec_loop = np.median(decs)
 				# allow the calculation to terminate early if the median ra and dec have converged to within a tenth of a pixel from their values the previous loop AND we've looked at at least 20 files
-				if abs(median_ra_loop - median_ra) < pscale_deg/10 and abs(median_dec_loop - median_dec) < pscale_deg/10 and i >= 20:
+				if abs(median_ra_loop - median_ra) < pscale_deg/10 and abs(median_dec_loop - median_dec) < pscale_deg/10 and i >= 100:
 					median_ra = median_ra_loop
 					median_dec = median_dec_loop
 					break
 				median_ra = median_ra_loop
 				median_dec = median_dec_loop
-			
+	# breakpoint()	
 	return median_ra, median_dec
 
 def get_flattened_files(date, target, ffname):
@@ -274,6 +274,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	im_distances = np.sqrt((avg_central_ra-central_ras)**2 + (avg_central_dec-central_decs)**2)
 	if min(im_distances*60*60/plate_scale) > 100:
 		logger.info(f'Image closest to field center is off by more than 100 pixels, returning.')
+		breakpoint()	
 		return None
 
 	logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
