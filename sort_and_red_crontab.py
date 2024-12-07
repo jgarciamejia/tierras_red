@@ -76,6 +76,7 @@ def main():
     targets = get_target_list(os.path.join(ipath,date))
 
     for target in targets:
+        print(f'Reducing {target}')
         if os.path.exists(os.path.join(fpath,date,target,ffname)):
             print ('{} exists : skipped'.format(os.path.join(fpath,date,target,ffname)))
             continue
@@ -97,7 +98,13 @@ def main():
         rfilelist = []
         for ifile,filename in enumerate(filelist):
             logging.info(filename)
-            ohl = irobj.read_and_reduce(filename,stitch=True)
+            try:
+                ohl = irobj.read_and_reduce(filename,stitch=True)
+            except:
+                print(f'{filename} corrupt, skipping.')
+                logging.info(f'{filename} corrupt, skipping.')
+                continue 
+
             basename = os.path.basename(filename)
             rfilename = re.sub('\.fit','',basename)+'_red.fit'
             rfilename = os.path.join(ffolder,rfilename)
@@ -163,6 +170,7 @@ def main():
             os.system('mv ' + badfile + ' '+ excfolder)
 
         # Save histogram with astrom solution stdv and number of stars used
+        plt.ioff()
         fig, (ax1,ax2) = plt.subplots(1,2,figsize=(14,7))
         fig.suptitle('Astrometry Evaluation: {} {}'.format(date,target))
 
@@ -175,6 +183,8 @@ def main():
         ax2.set_xlabel('Number of astrometric standards used')
         histogram = os.path.join(ffolder,"{}.{}_astrom_hist.pdf".format(date,target))
         fig.savefig(histogram)
+        plt.close()
+
         logging.info('Saved two histograms summarizing the astrometric solution.')
         logging.info('Data reduction for {} on {} done.'.format(target,date))
         logging.info('Data reduction report emailed')
