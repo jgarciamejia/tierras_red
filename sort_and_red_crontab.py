@@ -73,7 +73,7 @@ def main():
     lcpath = '/data/tierras/lightcurves'
 
     # Get target names observed
-    targets = get_target_list(os.path.join(ipath,date))
+    targets = sorted(list(get_target_list(os.path.join(ipath,date))))
 
     for target in targets:
         print(f'Reducing {target}')
@@ -111,7 +111,7 @@ def main():
             ohl.writeto(rfilename,overwrite=True)
             rfilelist.append(rfilename)
             logging.info(filename+ " -> " +rfilename)
-
+        
         # Exclude files where ASTROM solution fails and exptime diff. to mode of stack
         logging.info('Checking astrometric solution on plate solved files...')
 
@@ -142,15 +142,15 @@ def main():
                 continue
             stdcrms_lst = np.append(stdcrms_lst,stdcrms)
             numbrms_lst = np.append(numbrms_lst, numbrms)
-
+        
         logging.info('Astrometry checks: Done.')
 
         # Add any files with different exposure time to flagged list
         texp = stats.mode(exptimes)[0][0]
         logging.info('Stack texp = {} s.'.format(texp))
         for irfile,rfilename in enumerate(rfilelist):
-            if exptimes[ifile] != texp:
-                logging.info('texp = {} s for:'.format(exptimes[ifile]))
+            if exptimes[irfile] != texp:
+                logging.info('texp = {} s for:'.format(exptimes[irfile]))
                 logging.info(rfilename)
                 badfiles = np.append(badfiles,rfilename)
         logging.info('Exposure time checks: Done.')

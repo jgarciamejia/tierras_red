@@ -100,6 +100,7 @@ def main(raw_args=None):
 
 	# construct the images corrected by the median of neighboring pixels
 	n_ops = im_shape[1]*im_shape[0]
+	# norm = simple_norm(combined_images[0], min_percent=1, max_percent=99)
 	for i in range(n_ops):
 		coord = coordinates[i]
 		coord_data = combined_images[:, coord[1], coord[0]]
@@ -108,9 +109,19 @@ def main(raw_args=None):
 		combined_images[:, neighbor_yx[:,1], neighbor_yx[:,0]]
 		neighbor_data = np.median(combined_images[:, neighbor_yx[:,1], neighbor_yx[:,0]], axis=1) # an n_flat array of the median of the neighborhood_size-surrounding pixels 
 		avg_images[:, coord[1], coord[0]] = coord_data / neighbor_data
+
+		
 		if i % 99999 == 0 and i != 0:
 			percent_complete = (i+1)/n_ops * 100
 			print(f'{percent_complete:.2f}% complete.')
+
+			# plt.figure(figsize=(12,8))
+			# plt.imshow(combined_images[0], origin='lower', interpolation='none', norm=norm)
+			# plt.plot(coord[0], coord[1], 'bx', mew=2, ms=8)
+			# for j in range(len(neighbor_yx)):
+			# 	plt.plot(neighbor_yx[j][1], neighbor_yx[j][0], marker='x', ls='', color='r', mew=2, ms=8)
+			# breakpoint()
+			# plt.close()
 
 	print('Median-combining the glow-filtered flats...')
 	# save the median image and stddev images to /data/tierras/flats/
