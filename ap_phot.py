@@ -274,7 +274,6 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	im_distances = np.sqrt((avg_central_ra-central_ras)**2 + (avg_central_dec-central_decs)**2)
 	if min(im_distances*60*60/plate_scale) > 100:
 		logger.info(f'Image closest to field center is off by more than 100 pixels, returning.')
-		breakpoint()	
 		return None
 
 	logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
