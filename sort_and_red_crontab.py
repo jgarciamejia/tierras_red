@@ -104,7 +104,6 @@ def main():
                 print(f'{filename} corrupt, skipping.')
                 logging.info(f'{filename} corrupt, skipping.')
                 continue 
-
             basename = os.path.basename(filename)
             rfilename = re.sub('\.fit','',basename)+'_red.fit'
             rfilename = os.path.join(ffolder,rfilename)
@@ -119,7 +118,6 @@ def main():
         badfiles = np.array([])
         stdcrms_lst = np.array([])
         numbrms_lst = np.array([])
-
         for irfile,rfilename in enumerate(rfilelist):
             if '_red' in rfilename:
                 hdr_ind = 0
@@ -146,7 +144,8 @@ def main():
         logging.info('Astrometry checks: Done.')
 
         # Add any files with different exposure time to flagged list
-        texp = stats.mode(exptimes)[0][0]
+        # texp = stats.mode(exptimes)[0][0]
+        texp = stats.mode(exptimes).mode # changed 20250205
         logging.info('Stack texp = {} s.'.format(texp))
         for irfile,rfilename in enumerate(rfilelist):
             if exptimes[irfile] != texp:

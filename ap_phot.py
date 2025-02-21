@@ -4,7 +4,8 @@ import logging
 import numpy as np 
 np.seterr(divide='ignore', invalid='ignore')
 import pandas as pd
-from matplotlib.cm import get_cmap
+# from matplotlib.cm import get_cmap
+import matplotlib
 import matplotlib.pyplot as plt
 plt.ion()
 from matplotlib import gridspec
@@ -25,9 +26,7 @@ import astropy.units as u
 from astroquery.gaia import Gaia
 Gaia.MAIN_GAIA_TABLE = 'gaiadr3.gaia_source'
 from astroquery.vizier import Vizier
-from photutils import make_source_mask
 from photutils.detection import DAOStarFinder, IRAFStarFinder
-from photutils.psf import BasicPSFPhotometry, IntegratedGaussianPRF, DAOGroup, extract_stars, EPSFBuilder
 from photutils.background import Background2D, MedianBackground
 from photutils.aperture import CircularAperture, EllipticalAperture, CircularAnnulus, aperture_photometry
 from photutils.centroids import centroid_1dg, centroid_2dg, centroid_com, centroid_quadratic, centroid_sources
@@ -40,8 +39,6 @@ from copy import deepcopy
 import argparse
 import os 
 import stat
-import sys
-import lfa
 import time
 import astroalign as aa
 #import reproject as rp
@@ -61,6 +58,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq 
 from astroquery.simbad import Simbad
 # from fwhm import *
+# from astropy.utils import iers # IMPLEMENTED DUE TO ERRORS DOWNLOADING IERS DATA 20250131. REMOVE AT LATER DATE 
+# iers.conf.auto_download = False  
 
 # Suppress all Astropy warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="astropy")
@@ -140,7 +139,7 @@ def plot_image(data,use_wcs=False,cmap_name='viridis'):
 	#norm = ImageNormalize(data[4:2042,:], interval=interval) #Ignore a few rows near the top/bottom for the purpose of getting a good colormap
 
 	norm = simple_norm(data, stretch='linear', min_percent=1,max_percent=99.5)
-	cmap = get_cmap(cmap_name)
+	cmap = matplotlib.colormaps[cmap_name]
 	im_scale = 2
 	
 	if use_wcs:
@@ -311,16 +310,17 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 
 	logger.debug(f'Using a Gaia RP mag limit of {rp_mag_limit:.1f}.')
 
-	# query Gaia DR3 for all the sources in the field brighter than the calculated magnitude limit
+	# query Gaia DR3 for all the sources in the field brighter than the calculated magnitude limit	
 	job = Gaia.launch_job_async("""
 									SELECT source_id, ra, ra_error, dec, dec_error, ref_epoch, pmra, pmra_error, pmdec, pmdec_error, parallax, parallax_error, parallax_over_error, ruwe, phot_bp_mean_mag, phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_flux, phot_bp_mean_flux_error, phot_g_mean_flux, phot_g_mean_flux_error, phot_rp_mean_flux, phot_rp_mean_flux_error, bp_rp, bp_g, g_rp, grvs_mag, grvs_mag_error, phot_variable_flag,radial_velocity, radial_velocity_error, non_single_star, teff_gspphot, logg_gspphot, mh_gspphot, rvs_spec_sig_to_noise
-							 		FROM gaiadr3.gaia_source as gaia
+									FROM gaiadr3.gaia_source as gaia
 									WHERE gaia.ra BETWEEN {} AND {} AND
 											gaia.dec BETWEEN {} AND {} AND
-							 				gaia.phot_rp_mean_mag <= {}
+											gaia.phot_rp_mean_mag <= {}
 									ORDER BY phot_rp_mean_mag ASC
 								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, rp_mag_limit)
 								)
+
 	res = job.get_results()
 	res['SOURCE_ID'].name = 'source_id' # why does this get returned in all caps? 
 
@@ -367,8 +367,20 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 
 	# perform a crossmatch with 2MASS
 	gaia_coords = SkyCoord(ra=res['ra'], dec=res['dec'], pm_ra_cosdec=res['pmra'], pm_dec=res['pmdec'], obstime=Time('2016',format='decimalyear'))
-	v = Vizier(catalog="II/246",columns=['*','Date'], row_limit=-1)
-	twomass_res = v.query_region(coord, width=width, height=height)[0]
+
+	# 20250131: removed 2MASS queries which were causing "OSError: [Errno 122] Disk Quota exceeded"...
+	# we don't really use 2MASS information so it's not necessary to include
+	# unclear to me why this error was occurring, though
+
+	viz = Vizier(catalog="II/246",columns=['*','Date'], row_limit=-1)
+	try:
+		twomass_res = viz.query_region(coord, width=width, height=height)[0]
+	except:
+		try:
+			twomass_res = viz.query_region(coord, width=int(width.value)*u.arcsec, height=int(height.value)*u.arcsec)[0] # no idea why but some queries fail if these aren't ints
+		except:
+			print('rm -rf ~/.astropy/cache/astroquery/Vizier and run again!')
+	
 	twomass_coords = SkyCoord(twomass_res['RAJ2000'],twomass_res['DEJ2000'])
 	twomass_epoch = Time('2000-01-01')
 	gaia_coords_tm_epoch = gaia_coords.apply_space_motion(twomass_epoch)
@@ -999,7 +1011,8 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		# source_x[:,i] = transformed_pixel_coordinates[:,0]
 		# source_y[:,i] = transformed_pixel_coordinates[:,1]
 
-		source_x[:,i], source_y[:,i] = source_wcs.world_to_pixel(SkyCoord(sources['ra_tierras']*u.deg, sources['dec_tierras']*u.deg))
+		source_x[:,i], source_y[:,i] = source_wcs.world_to_pixel(SkyCoord(np.array(sources['ra_tierras'])*u.deg, np.array(sources['dec_tierras'])*u.deg))
+
 
 		# fig2, ax2 = plot_image(source_data)
 		# for j in range(len(source_x[:,i])):
@@ -2463,7 +2476,7 @@ def measure_fwhm_grid(date, field, ffname, sources, box_size=512):
 
 			cutout_shape = g_2d_cutout.shape
 
-			bkg = np.median(g_2d_cutout)
+			bkg = np.nanmedian(g_2d_cutout)
 			# bkg = np.mean(sigmaclip(g_2d_cutout,2,2)[0])
 
 			g_2d_cutout -= bkg 
@@ -2475,7 +2488,11 @@ def measure_fwhm_grid(date, field, ffname, sources, box_size=512):
 				yy = yy3
 			else:
 				xx = xx2
-				yy = yy2 
+				yy = yy2
+
+			# interpolate nans inf they exist
+			if np.sum(np.isnan(g_2d_cutout)) > 0:
+				g_2d_cutout = interpolate_replace_nans(g_2d_cutout, Gaussian2DKernel(x_stddev=0.5)) 
 			
 			# intialize the model 
 			g_init.amplitude = g_2d_cutout[int(cutout_pos[1]), int(cutout_pos[0])]
@@ -2484,8 +2501,14 @@ def measure_fwhm_grid(date, field, ffname, sources, box_size=512):
 			g_init.x_mean = cutout_pos[0]
 			g_init.y_mean = cutout_pos[1]
 
+			try:
+				g = fit_g(g_init,xx,yy,g_2d_cutout)
+			except:
+				# if the fit fails, set stddevs and theta to NaN
+				g.x_stddev.value = np.nan
+				g.y_stddev_value = np.nan 
+				g.theta = np.nan 	
 
-			g = fit_g(g_init,xx,yy,g_2d_cutout)
 			
 			if g.y_stddev.value > g.x_stddev.value:
 				x_stddev_save = g.x_stddev.value
