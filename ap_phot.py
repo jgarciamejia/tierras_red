@@ -66,6 +66,22 @@ warnings.filterwarnings("ignore", category=UserWarning, module="astropy")
 
 def get_median_field_pointing(target):
 	file_paths = sorted(glob(f'/data/tierras/flattened/*/{target}/flat*/*_red.fit'))[::-1]
+	
+	# user can specify dates to ignore for this calculation in /data/tierras/fields/TARGET/ignore_dates.txt
+	if os.path.exists(f'/data/tierras/fields/{target}/ignore_dates.txt'):
+		with open(f'/data/tierras/fields/{target}/ignore_dates.txt') as f:
+			ignore_dates = f.readlines()
+		ignore_dates = [i.strip() for i in ignore_dates]
+		file_paths = np.array(file_paths)
+		delete_inds = []
+		for i in range(len(file_paths)):
+			file_path = file_paths[i]
+			file_date = file_path.split('/')[4]
+			if file_date in ignore_dates:
+				delete_inds.append(i)
+
+		file_paths = np.delete(file_paths, delete_inds)
+
 	ras, decs = [], []
 	im_shape = (2048, 4096)
 	median_ra = 0
@@ -83,14 +99,13 @@ def get_median_field_pointing(target):
 				decs.append(sc.dec.value)
 				median_ra_loop = np.median(ras)
 				median_dec_loop = np.median(decs)
-				# allow the calculation to terminate early if the median ra and dec have converged to within a tenth of a pixel from their values the previous loop AND we've looked at at least 20 files
+				# allow the calculation to terminate early if the median ra and dec have converged to within a tenth of a pixel from their values the previous loop AND we've looked at at least 100 files
 				if abs(median_ra_loop - median_ra) < pscale_deg/10 and abs(median_dec_loop - median_dec) < pscale_deg/10 and i >= 100:
 					median_ra = median_ra_loop
 					median_dec = median_dec_loop
 					break
 				median_ra = median_ra_loop
 				median_dec = median_dec_loop
-	# breakpoint()	
 	return median_ra, median_dec
 
 def get_flattened_files(date, target, ffname):
@@ -272,6 +287,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	# identify the image closest to the average position; if it's off by more than 100 pix from the average pointing, skip
 	im_distances = np.sqrt((avg_central_ra-central_ras)**2 + (avg_central_dec-central_decs)**2)
 	if min(im_distances*60*60/plate_scale) > 100:
+		breakpoint()
 		logger.info(f'Image closest to field center is off by more than 100 pixels, returning.')
 		return None
 
