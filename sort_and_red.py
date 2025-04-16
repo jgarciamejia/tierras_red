@@ -129,7 +129,7 @@ for irfile,rfilename in enumerate(rfilelist):
 logging.info('Astrometry checks: Done.')
 
 # Add any files with different exposure time to flagged list
-texp = stats.mode(exptimes)[0][0]
+texp = stats.mode(exptimes).mode
 logging.info('Stack texp = {} s.'.format(texp))
 for irfile,rfilename in enumerate(rfilelist):
     if exptimes[ifile] != texp:

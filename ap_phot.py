@@ -285,9 +285,8 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 		return None
 	
 	# identify the image closest to the average position; if it's off by more than 100 pix from the average pointing, skip
-	im_distances = np.sqrt((avg_central_ra-central_ras)**2 + (avg_central_dec-central_decs)**2)
+	im_distances = np.sqrt((avg_central_ra-np.array(central_ras))**2 + (avg_central_dec-np.array(central_decs))**2)
 	if min(im_distances*60*60/plate_scale) > 100:
-		breakpoint()
 		logger.info(f'Image closest to field center is off by more than 100 pixels, returning.')
 		return None
 
@@ -389,13 +388,16 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	# unclear to me why this error was occurring, though
 
 	viz = Vizier(catalog="II/246",columns=['*','Date'], row_limit=-1)
-	try:
-		twomass_res = viz.query_region(coord, width=width, height=height)[0]
-	except:
+	max_tries = 2
+	try_n = 0 
+	while try_n < max_tries:
 		try:
-			twomass_res = viz.query_region(coord, width=int(width.value)*u.arcsec, height=int(height.value)*u.arcsec)[0] # no idea why but some queries fail if these aren't ints
+			twomass_res = viz.query_region(coord, width=width, height=height)[0]
+			break
 		except:
-			print('rm -rf ~/.astropy/cache/astroquery/Vizier and run again!')
+			# sometimes the cache needs to be removed for this to work. 
+			os.system('rm -rf ~/.astropy/cache/astroquery/Vizier')
+			try_n += 1
 	
 	twomass_coords = SkyCoord(twomass_res['RAJ2000'],twomass_res['DEJ2000'])
 	twomass_epoch = Time('2000-01-01')
@@ -656,7 +658,7 @@ def jd_utc_to_bjd_tdb(jd_utc, ra, dec, location='Whipple'):
 
 	if type(ra) == str:
 		ra_unit = u.hourangle
-	elif type(ra) == np.float64:
+	elif type(ra) == float:
 		ra_unit = u.deg
 
 	if location == 'Whipple':
