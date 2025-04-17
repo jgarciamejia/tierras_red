@@ -8,6 +8,7 @@ import time
 import logging 
 import subprocess
 import argparse
+import shlex
 
 logfile = '/data/tierras/log/pipeline.log'
 logging.basicConfig(filename=logfile, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,8 +17,9 @@ emails = ['patrick.tamburo@cfa.harvard.edu', 'juliana.garcia-mejia@cfa.harvard.e
 def notify_failure(subject): 
     # email Pat / Juliana if the pipeline breaks
     recipients = " ".join(emails)
+    safe_subject = shlex.quote(subject)  # adds quotes and escapes special chars
     try: 
-        cmd = f'echo | mutt "{subject}" {recipients}'
+        cmd = f'echo | mutt -s {safe_subject} {recipients}'
         os.system(cmd)
     except Exception as e:
         logging.error(f'Failed to send error notification with mutt: {e}')
