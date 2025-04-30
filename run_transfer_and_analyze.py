@@ -56,11 +56,12 @@ def main(run_now=False):
         return
 
     try: 
+        PYTHON = '/opt/cfpython/python-3.11.9/bin/python' # this is needed to work with crontab
         run_command('/home/ptamburo/bin/tierrascopy', 'Data transfer from telescope')
-        run_command('python /home/ptamburo/tierras/tierras_track/mv_autoobservelog.py', 'Transfer autoobserve log')
-        run_command('python /home/ptamburo/tierras/tierras_track/mv_teldlog.py', 'Transfer teld log')
-        run_command('python /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py', 'Reduce data')
-        run_command('python /home/ptamburo/tierras/tierras_analyze/process_data.py', 'Run photometry and make light curves')
+        run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_track/mv_autoobservelog.py', 'Transfer autoobserve log')
+        run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_track/mv_teldlog.py', 'Transfer teld log')
+        run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py', 'Reduce data')
+        run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_analyze/process_data.py', 'Run photometry and make light curves')
     except Exception: 
         logging.error('Pipeline terminated early due to previous error.')
 
