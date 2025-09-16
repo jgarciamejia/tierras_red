@@ -16,8 +16,16 @@ def main(raw_args=None):
     end_date = args.end_date
 
     flats_dir = '/data/tierras/flats/'
-    flats = sorted(glob(flats_dir+'*.fit'))
-    flat_dates = np.array([datetime.strptime(i.split('/')[-1].split('_')[0], '%Y%m%d') for i in flats])
+    flats = np.array(sorted(glob(flats_dir+'*_FLAT.fit')))
+    flat_dates = []
+    keep_inds = []
+    for i in range(len(flats)):
+        if 'SUPER' in flats[i]:
+            continue
+        flat_dates.append(datetime.strptime(flats[i].split('/')[-1].split('_')[0], '%Y%m%d'))
+        keep_inds.append(i)
+    flat_dates = np.array(flat_dates)
+    flats = flats[keep_inds]
 
     if start_date is not None: 
         start_date = datetime.strptime(start_date, '%Y%m%d')
@@ -36,7 +44,7 @@ def main(raw_args=None):
 
     print(f'Median combining {len(flats)} flats between {start_date.strftime("%Y%m%d")} and {end_date.strftime("%Y%m%d")}.')
 
-    flat_data = np.zeros((len(flats), 2048, 4096))
+    flat_data = np.zeros((len(flats), 2048, 4096), dtype='float32')
     for i in range(len(flats)):
         flat_data[i] = fits.open(flats[i])[0].data
     superflat = np.median(flat_data, axis=0)
@@ -52,7 +60,7 @@ def main(raw_args=None):
     output_hdul = fits.HDUList([fits.PrimaryHDU(data=superflat, header=hdr)])
 
     output_path = flats_dir+f'SUPERFLAT_{start_date.strftime("%Y%m%d")}_to_{end_date.strftime("%Y%m%d")}.fit'
-    output_hdul.writeto(output_path)
+    output_hdul.writeto(output_path, overwrite=True)
     set_tierras_permissions(output_path)
     print(f'Wrote superflat to {output_path}!')
 

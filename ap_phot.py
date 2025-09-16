@@ -337,7 +337,10 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 								)
 
 	res = job.get_results()
-	res['SOURCE_ID'].name = 'source_id' # why does this get returned in all caps? 
+	try:
+		res['SOURCE_ID'].name = 'source_id' # why does this sometimes get returned in all caps? 
+	except:
+		pass
 
 	# Do a separate search for objects in the Bailer-Jones 'photogeo' catalog
 	job = Gaia.launch_job_async("""SELECT
@@ -414,7 +417,11 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	tierras_pixel_coords = wcs.world_to_pixel(gaia_coords_tierras_epoch)
 
 	# add 2MASS data and pixel positions to the source table
-	res.add_column(twomass_res['_2MASS'][idx_gaia],name='2MASS',index=1)
+	try:
+		# WHY does this sometimes get returned with a _ in front? 
+		res.add_column(twomass_res['_2MASS'][idx_gaia],name='2MASS',index=1)
+	except:
+		res.add_column(twomass_res['2MASS'][idx_gaia],name='2MASS',index=1)
 	res.add_column(tierras_pixel_coords[0],name='X pix', index=2)
 	res.add_column(tierras_pixel_coords[1],name='Y pix', index=3)
 	res.add_column(gaia_coords_tierras_epoch.ra, name='ra_tierras', index=4)

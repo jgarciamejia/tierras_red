@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/opt/cfpython/anaconda3.7/bin/python
 
 from __future__ import print_function
 
@@ -13,8 +13,10 @@ import matplotlib.pyplot as plt
 from astropy.visualization import simple_norm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 plt.ion()
-
+from astropy.io import fits 
+from ap_phot import set_tierras_permissions
 import numpy as np
+from scipy.stats import sigmaclip
 
 try:
   import astropy.utils.exceptions
@@ -26,147 +28,102 @@ import lfa
 
 from fitsutil import *
 
-def process_extension(imp):
-  hdr = imp.header
+def process_extension(imp, iext):
+	hdr = imp.header
   
-  if "BIASSEC" in hdr:
-    biassec = fits_section(hdr["BIASSEC"])
-  else:
-    biassec = None
-      
-  if "TRIMSEC" in hdr:
-    trimsec = fits_section(hdr["TRIMSEC"])
-  else:
-    trimsec = None
-      
-  raw = np.float32(imp.data)
+	if "BIASSEC" in hdr:
+		biassec = fits_section(hdr["BIASSEC"])
+	else:
+		biassec = None
+	  
+	if "TRIMSEC" in hdr:
+		trimsec = fits_section(hdr["TRIMSEC"])
+	else:
+		trimsec = None
+	  
+	raw = np.float32(imp.data)
 
-  if biassec is not None:
-    biaslev, biassig = lfa.skylevel_image(raw[biassec[2]:biassec[3],biassec[0]:biassec[1]])
-  else:
-    biaslev = 0
+	if biassec is not None:
+		biaslev, biassig = lfa.skylevel_image(raw[biassec[2]:biassec[3],biassec[0]:biassec[1]])
+	else:
+		biaslev = 0
 
-  if trimsec is not None:
-    procimg = raw[trimsec[2]:trimsec[3],trimsec[0]:trimsec[1]] - biaslev
-  else:
-    procimg = raw - biaslev
+	if trimsec is not None:
+		procimg = raw[trimsec[2]:trimsec[3],trimsec[0]:trimsec[1]] - biaslev
+	else:
+		procimg = raw - biaslev
 
-  skylev, skynoise = lfa.skylevel_image(procimg)
+	if iext == 2:
+		procimg = np.flipud(procimg) # top half of image is read in upside down under the current read-in scheme, so flip it here
 
-  if iext == 2:
-    procimg = np.flipud(procimg) # top half of image is read in upside down under the current read-in scheme, so flip it here
-
-  return procimg / skylev, skylev, skynoise / skylev
+	return procimg
 
 if __name__ == "__main__":
-  try:
-    warnings.simplefilter("ignore",
-                          astropy.utils.exceptions.AstropyDeprecationWarning)
-  except NameError:
-    pass
-  
-  # Deal with the command line.
-  ap = argparse.ArgumentParser()
-  # ap.add_argument("filelist", metavar="file", nargs="+", help="input files")
-  # ap.add_argument("-o", help="output file")
-  ap.add_argument("-date", required=True, help="YYYYMMDD of the date on which flats were taken.")
+	# Deal with the command line.
+	ap = argparse.ArgumentParser()
+	# ap.add_argument("filelist", metavar="file", nargs="+", help="input files")
+	# ap.add_argument("-o", help="output file")
+	ap.add_argument("-date", required=True, help="YYYYMMDD of the date on which flats were taken.")
 
   
-  args = ap.parse_args()
+	args = ap.parse_args()
   
-  date = args.date
+	date = args.date
 
-  filepath = f'/data/tierras/incoming/{date}/'
-  filelist = glob(filepath+'*FLAT[0-9][0-9][0-9].fit')
-  filelist = np.array(sorted(filelist, key=lambda x:int(x.split('FLAT')[-1].split('.')[0]))) # make sure the files are sorted 
-  nf = len(filelist)
+	filepath = f'/data/tierras/incoming/{date}/'
+	filelist = glob(filepath+'*FLAT[0-9][0-9][0-9].fit')
+	filelist = np.array(sorted(filelist, key=lambda x:int(x.split('FLAT')[-1].split('.')[0]))) # make sure the files are sorted 
+	nf = len(filelist)
 
-  fplist = [ pyfits.open(filename) for filename in filelist ]
-  
-  outhdus = []
+	fplist = [ pyfits.open(filename) for filename in filelist ]
 
-  for iext, rmp in enumerate(fplist[0]):
-    if hasimg(rmp):
-      hdr = rmp.header
-      hdrout = hdr.copy(strip=True)
+	outhdus = []
 
-      for key in ("BIASSEC", "SMEARSEC"):
-        if key in hdrout:
-          del hdrout[key]
+	combined_images = []
+	for i, filename in enumerate(filelist):
+		print(f'Doing {filename} ({i+1} of {nf})')
+		with fits.open(filename) as ifp:
+			proc_imgs = [process_extension(ifp[j], j) for j in range(1, 3)]
+		combined_img = np.concatenate(proc_imgs, axis=0)
+		combined_images.append(combined_img)
 
-      allimg = [None] * nf
-      allsky = [None] * nf
-      allrms = [None] * nf
+	combined_images = np.array(combined_images)
+	# loop over the combined flats and reject any that are significant flux outliers 
+	flat_medians = np.zeros(len(combined_images))
+	for i in range(len(combined_images)):
+		flat_medians[i] = np.median(combined_images[i])
 
-      for ifile in range(nf):
-        print(f'Reading {filelist[ifile]}, {ifile+1} of {len(filelist)}, extension {iext}')
-        # Open file.
-        ifp = fplist[ifile]
-        imp = ifp[iext]
-        allimg[ifile], allsky[ifile], allrms[ifile] = process_extension(imp)
+	v, l, h = sigmaclip(flat_medians, 5, 5) # do a 5-sigma outlier rejection
 
-      allimg = np.array(allimg)
-      allsky = np.array(allsky)
-      allrms = np.array(allrms)
+	# plt.axvline(l, color='tab:orange', ls='--')
+	# plt.axvline(h, color='tab:orange', ls='--')
+	use_inds = np.where((flat_medians > l) & (flat_medians < h))[0]
+	print(f'Discarded {len(combined_images) - len(use_inds)} flats with 5-sigma median flux clipping. {len(use_inds)} flats will be combined.')
 
-      # Median combine normalized images.
-      print(f'Median combining the flats, extension {iext}')
-      medimg = np.median(allimg, axis=0)
+	# update arrays with use_inds 
+	n_files = len(use_inds)
+	flat_files = filelist[use_inds]
+	combined_images = combined_images[use_inds]
+	flat_medians = flat_medians[use_inds] 
 
-      ny, nx = medimg.shape
-      
-      # Simple upper envelope clipping.
-      resid = allimg - medimg
+	# median-normalize each individual flat 
+	for i in range(len(combined_images)):
+		norm = np.nanmedian(combined_images[i])
+		combined_images[i] /= norm 
 
-      # This trick broadcasts the comparison to rms over the first dimension
-      # of "resid" (the input file) by transposing temporarily so it's the
-      # last dimension during the calculation.
-      ww = (resid.T > 3.0 * allrms).T
-      
-      nclipped = np.sum(ww)
+	median_image = np.median(combined_images, axis=0) # the median-combined image (across the flat sequence)
 
-      if nclipped > 0:
-        allimg[ww] = np.nan
-        medimg[:] = np.nanmedian(allimg, axis=0)
+	# make a header to save some info about the flats that went into the combined flat
+	hdr = fits.Header()
+	hdr['COMMENT'] = f'N_flats = {n_files}'
+	hdr['COMMENT'] = f'Median illumiation = {np.median(flat_medians)} ADU'
+	hdr['COMMENT'] = 'Combined the following flats:'
+	for i in range(n_files):
+		hdr['COMMENT'] = flat_files[i]
+	
+	output_hdul = fits.HDUList([fits.PrimaryHDU(data=median_image, header=hdr)])
 
-      logging.info("Clipped {0:d}".format(nclipped))
-
-      # Scale output back to original level.
-      outimg = medimg * allsky[0]
-
-      # Adjust headers to account for trim.
-      newsect = "[1:{0:d},1:{1:d}]".format(nx, ny)
-      hdrout["DATASEC"] = newsect
-      hdrout["TRIMSEC"] = newsect
-
-      if iext == 0:
-        outhdu = pyfits.PrimaryHDU(outimg, header=hdrout)
-      else:
-        outhdu = pyfits.ImageHDU(outimg, header=hdrout)
-    else:
-      outhdu = rmp.copy()
-
-    outhdus.append(outhdu)
-
-  # stitch into a single image 
-  outimg_stitch = np.zeros((ny*2, nx), dtype=np.float32)
-  outimg_stitch[0:ny,:] = outhdus[1].data
-  outimg_stitch[ny:, :] = outhdus[2].data
-  
-  norm = simple_norm(outimg_stitch, min_percent=1, max_percent=99)
-
-  fig, ax = plt.subplots(1, 1, figsize=(12,6))
-  im = ax.imshow(outimg_stitch, origin='lower', norm=norm, interpolation='none')
-  divider = make_axes_locatable(ax)
-  cax = divider.append_axes('right', size='5%', pad=0.05)
-  cb = fig.colorbar(im, cax=cax, orientation='vertical')
-  cb.set_label(label='ADU')
-  ax.set_title(f'Combined Flat, {date}')
-
-  plt.tight_layout()
-
-  breakpoint()
-  # Write output file.
-  if args.o is not None:
-    ohl = pyfits.HDUList(outhdus)
-    ohl.writeto(args.o, clobber=True)
+	# record: n_flats, median pixel illumination, filepaths of flat files 
+	output_path = f'/data/tierras/flats/{date}_FLAT.fit'
+	output_hdul.writeto(output_path, overwrite=True)
+	set_tierras_permissions(output_path)
