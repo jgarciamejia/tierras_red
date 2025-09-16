@@ -4,16 +4,18 @@ plt.ion()
 from glob import glob 
 from astropy.io import fits
 import argparse 
-from datetime import datetime 
+from datetime import datetime, timedelta
 from ap_phot import set_tierras_permissions
 
 def main(raw_args=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('-start_date', required=False, default=None, help='Start date (YYYYMMDD) on which to begin loading flats for combination. If None, starts from the earliest avaiable flat.')
     ap.add_argument('-end_date', required=False, default=None, help='End date (YYYYMMDD) on which to stop loading flats for combination. If None, ends on the latest avaiable flat.')
+    ap.add_argument('-day_window', required=False, default=60, type=int, help='If only the end date is passed, the code will look for other flats within day_window dayss of the end date to generate the super flat. This is mainly used in run_transfer_and_analyze.py')
     args = ap.parse_args(raw_args)
     start_date = args.start_date 
     end_date = args.end_date
+    day_window = args.day_window
 
     flats_dir = '/data/tierras/flats/'
     flats = np.array(sorted(glob(flats_dir+'*_FLAT.fit')))
@@ -27,15 +29,15 @@ def main(raw_args=None):
     flat_dates = np.array(flat_dates)
     flats = flats[keep_inds]
 
-    if start_date is not None: 
-        start_date = datetime.strptime(start_date, '%Y%m%d')
-    else:
-        start_date = flat_dates[0]
-
     if end_date is not None:
         end_date = datetime.strptime(end_date, '%Y%m%d')
     else:
         end_date = flat_dates[-1]
+
+    if start_date is not None: 
+        start_date = datetime.strptime(start_date, '%Y%m%d')
+    else:
+        start_date = end_date - timedelta(days=day_window)
 
     inds = np.array([i >= start_date and i <= end_date for i in flat_dates])
 

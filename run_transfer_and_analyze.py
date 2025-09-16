@@ -1,6 +1,6 @@
 #!/opt/cfpython/python-3.11.9/bin/python
 import os 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from astroplan import Observer 
 from astropy.time import Time
 import astropy.units as u
@@ -9,6 +9,8 @@ import logging
 import subprocess
 import argparse
 import shlex
+from glob import glob 
+import numpy as np 
 
 logfile = '/data/tierras/log/pipeline.log'
 logging.basicConfig(filename=logfile, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -56,11 +58,51 @@ def main(run_now=False):
         return
 
     try: 
+        cal_date = Time(datetime.now(timezone.utc)-timedelta(days=1)).strftime('%Y%m%d')
+
         PYTHON = '/opt/cfpython/python-3.11.9/bin/python' # this is needed to work with crontab
         run_command('/home/ptamburo/bin/tierrascopy', 'Data transfer from telescope')
         run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_track/mv_autoobservelog.py', 'Transfer autoobserve log')
         run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_track/mv_teldlog.py', 'Transfer teld log')
-        run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py', 'Reduce data')
+
+        # check for flats 
+        # if they were taken, make a flat and a new superflat
+        file_list = np.array(sorted(glob(f'/data/tierras/incoming/{cal_date}/*.fit')))
+        n_flats = 0
+        flats = False
+        for i in range(len(file_list)):
+            if 'FLAT' in file_list[i]:
+                n_flats += 1
+
+        if n_flats > 2:
+            flats = True
+
+        # if we got more than 2 flats...
+        if flats:
+            # don't need to pass the python path here since its declared at the start of the flatcombine.py program
+            # make the flat 
+            run_command(f'/home/ptamburo/tierras/tierras_red/flatcombine.py -date {cal_date}', 'Make flat field')
+
+            # make a new super flat including the newest flat, with a window looking back 60 nights
+            run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/superflat.py -end_date {cal_date} -day_window 60', 'Make superflat')
+
+    
+        run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py -ffname flat0000', 'Reduce data')
+
+        # for now, run a parallel reduction that does the flat fielding correction and saves to flat0001 directories
+
+        # get the list of available super flats
+        super_flats = np.array(sorted(glob('/data/tierras/flats/SUPERFLAT*')))
+
+        # choose the one whose end date is closest to the current date? 
+        super_flat_end_dates = [datetime.strptime(i.split('/')[-1].split('_')[-1].split('.')[0], '%Y%m%d') for i in super_flats]
+
+        deltas = np.array([abs((datetime.strptime(cal_date, '%Y%m%d')- i).days) for i in super_flat_end_dates])
+
+        super_flat = super_flats[np.argmin(deltas)]
+
+        run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py -ffname flat0001 -f {super_flat}', 'Reduce data')
+
         run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_analyze/process_data.py', 'Run photometry and make light curves')
     except Exception: 
         logging.error('Pipeline terminated early due to previous error.')

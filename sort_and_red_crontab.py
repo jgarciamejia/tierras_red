@@ -12,7 +12,7 @@ from scipy import stats
 from astropy.io import fits 
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-
+from ap_phot import set_tierras_permissions
 from imred import *
 
 def create_directories(basepath,date,target,folder1):
@@ -61,10 +61,12 @@ def main():
     # Argparser for flatfielding (but note ffname is fixed)
     ap = argparse.ArgumentParser()
     ap.add_argument("-f", help="flat file with which to reduce data")
+    ap.add_argument('-ffname', default='flat0000', help='name of directory into which flattened data will be saved')
     args = ap.parse_args()
+    ffname = args.ffname
+    flatpath = args.f
 
     # Access observation info
-    ffname = "flat0000" #eventually will have to upgrade to actually pass a flat file
     date = get_yday_date()
 
     # Define base paths    
@@ -83,6 +85,10 @@ def main():
         # Create flattened file and light curve directories 
         ffolder = create_directories(fpath,date,target,ffname)
 
+        if not os.path.exists(ffolder):
+            os.mkdir(ffolder)
+            set_tierras_permissions(ffolder)
+
         # Set up logger
         logfile = os.path.join(ffolder,'{}.{}.redlog.txt'.format(date,target))
         for handler in logging.root.handlers[:]:
@@ -94,7 +100,7 @@ def main():
 
         # Reduce each FITS file from date and target
         logging.info('Reducing {} FITS files...'.format(len(filelist)))
-        irobj = imred(args.f)
+        irobj = imred(flatfile=flatpath)
         rfilelist = []
         for ifile,filename in enumerate(filelist):
             logging.info(filename)
