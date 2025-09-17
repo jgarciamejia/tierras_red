@@ -73,7 +73,6 @@ def main():
     else:
         date = args.date
 
-    breakpoint()
     
     # Define base paths    
     ipath = '/data/tierras/incoming'
