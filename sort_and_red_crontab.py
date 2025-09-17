@@ -62,13 +62,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-f", help="flat file with which to reduce data")
     ap.add_argument('-ffname', default='flat0000', help='name of directory into which flattened data will be saved')
+    ap.add_argument('-date', default=None, help='Calendar date for which to reduce data. If not passed, will assume yesterday.')
     args = ap.parse_args()
     ffname = args.ffname
     flatpath = args.f
 
-    # Access observation info
-    date = get_yday_date()
+    if args.date is None:
+        # Access observation info
+        date = get_yday_date()
+    else:
+        date = args.date
 
+    breakpoint()
+    
     # Define base paths    
     ipath = '/data/tierras/incoming'
     fpath = '/data/tierras/flattened'
