@@ -66,7 +66,7 @@ def process_extension(imp, iext):
 	if iext == 2:
 		procimg = np.flipud(procimg) # top half of image is read in upside down under the current read-in scheme, so flip it here
 
-	return procimg
+	return procimg.astype(np.float32)
 
 if __name__ == "__main__":
 	# Deal with the command line.
