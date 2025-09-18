@@ -30,6 +30,9 @@ from fitsutil import *
 
 def process_extension(imp, iext):
 	hdr = imp.header
+
+	deg = 8 # degree of polynomial fit to overscan for bias subtraction
+	x = np.arange(1024) # row indices for computing bias subtraction fit
   
 	if "BIASSEC" in hdr:
 		biassec = fits_section(hdr["BIASSEC"])
@@ -46,10 +49,12 @@ def process_extension(imp, iext):
 	if biassec is not None:
 		# biaslev, biassig = lfa.skylevel_image(raw[biassec[2]:biassec[3],biassec[0]:biassec[1]])
 		bias_img = raw[biassec[2]:biassec[3],biassec[0]:biassec[1]]
-		blocks = np.median(bias_img,axis=1).reshape(8,128) 
+		# blocks = np.median(bias_img,axis=1).reshape(8,128) 
 
-		means = np.mean(blocks, axis=1)
-		biaslev = np.repeat(means, 128)
+		# means = np.mean(blocks, axis=1)
+		# biaslev = np.repeat(means, 128)
+		coeffs = np.polyfit(x, np.median(bias_img, axis=1), deg)
+		biaslev = np.polyval(coeffs, x) 
 	else:
 		biaslev = 0
 
