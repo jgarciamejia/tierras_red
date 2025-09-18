@@ -1,3 +1,5 @@
+#!/opt/cfpython/anaconda3.7/bin/python
+
 import numpy as np 
 import matplotlib.pyplot as plt 
 plt.ion()

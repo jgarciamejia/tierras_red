@@ -106,12 +106,12 @@ def main():
         rfilelist = []
         for ifile,filename in enumerate(filelist):
             logging.info(filename)
-            try:
-                ohl = irobj.read_and_reduce(filename,stitch=True)
-            except:
-                print(f'{filename} corrupt, skipping.')
-                logging.info(f'{filename} corrupt, skipping.')
-                continue 
+            #try:
+            ohl = irobj.read_and_reduce(filename,stitch=True)
+            #except:
+            #    print(f'{filename} corrupt, skipping.')
+            #    logging.info(f'{filename} corrupt, skipping.')
+            #    continue 
             basename = os.path.basename(filename)
             rfilename = re.sub('\.fit','',basename)+'_red.fit'
             rfilename = os.path.join(ffolder,rfilename)

@@ -102,7 +102,7 @@ def main(run_now=False):
         super_flat = super_flats[np.argmin(deltas)]
 
         run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py -ffname flat0001 -f {super_flat}', 'Reduce data')
-
+        
         run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_analyze/process_data.py', 'Run photometry and make light curves')
     except Exception: 
         logging.error('Pipeline terminated early due to previous error.')

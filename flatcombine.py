@@ -44,12 +44,17 @@ def process_extension(imp, iext):
 	raw = np.float32(imp.data)
 
 	if biassec is not None:
-		biaslev, biassig = lfa.skylevel_image(raw[biassec[2]:biassec[3],biassec[0]:biassec[1]])
+		# biaslev, biassig = lfa.skylevel_image(raw[biassec[2]:biassec[3],biassec[0]:biassec[1]])
+		bias_img = raw[biassec[2]:biassec[3],biassec[0]:biassec[1]]
+		blocks = np.median(bias_img,axis=1).reshape(8,128) 
+
+		means = np.mean(blocks, axis=1)
+		biaslev = np.repeat(means, 128)
 	else:
 		biaslev = 0
 
 	if trimsec is not None:
-		procimg = raw[trimsec[2]:trimsec[3],trimsec[0]:trimsec[1]] - biaslev
+		procimg = raw[trimsec[2]:trimsec[3],trimsec[0]:trimsec[1]] - biaslev[:,None]
 	else:
 		procimg = raw - biaslev
 
