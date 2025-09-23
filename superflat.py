@@ -61,6 +61,8 @@ def main(raw_args=None):
 
     output_hdul = fits.HDUList([fits.PrimaryHDU(data=superflat, header=hdr)])
 
+    start_date = flat_dates[0]
+    end_date = flat_dates[-1]
     output_path = flats_dir+f'SUPERFLAT_{start_date.strftime("%Y%m%d")}_to_{end_date.strftime("%Y%m%d")}.fit'
     output_hdul.writeto(output_path, overwrite=True)
     set_tierras_permissions(output_path)
