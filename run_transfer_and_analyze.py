@@ -86,8 +86,8 @@ def main(run_now=False):
             # make a new super flat including the newest flat, with a window looking back 60 nights
             run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/superflat.py -end_date {cal_date} -day_window 60', 'Make superflat')
 
-    
-        run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py -ffname flat0000', 'Reduce data')
+        # in the ORIGINAL pipeline, we would not flat field the data
+        # run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py -ffname flat0000', 'Reduce data')
 
         # for now, run a parallel reduction that does the flat fielding correction and saves to flat0001 directories
 
@@ -101,7 +101,8 @@ def main(run_now=False):
 
         super_flat = super_flats[np.argmin(deltas)]
 
-        run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py -ffname flat0001 -f {super_flat}', 'Reduce data')
+        # from September 2025 onward, we flat field the data
+        run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py -ffname flat0000 -f {super_flat}', 'Reduce data')
         
         run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_analyze/process_data.py', 'Run photometry and make light curves')
     except Exception: 

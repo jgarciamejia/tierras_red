@@ -391,7 +391,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	# unclear to me why this error was occurring, though
 
 	viz = Vizier(catalog="II/246",columns=['*','Date'], row_limit=-1)
-	max_tries = 2
+	max_tries = 3
 	try_n = 0 
 	while try_n < max_tries:
 		try:
