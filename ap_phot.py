@@ -20,7 +20,7 @@ from astropy.modeling import models, fitting
 from astropy import coordinates as coord
 from astropy import units as u
 from astropy.time import Time
-from astropy.table import Table, QTable
+from astropy.table import Table, QTable, join
 from astropy.nddata import NDData
 import astropy.units as u 
 from astroquery.gaia import Gaia
@@ -57,6 +57,8 @@ from astropy.modeling.functional_models import Gaussian2D, Gaussian1D
 import pyarrow as pa 
 import pyarrow.parquet as pq 
 from astroquery.simbad import Simbad
+from astropy_healpix import HEALPix      
+
 # from fwhm import *
 # from astropy.utils import iers # IMPLEMENTED DUE TO ERRORS DOWNLOADING IERS DATA 20250131. REMOVE AT LATER DATE 
 # iers.conf.auto_download = False  
@@ -196,6 +198,145 @@ def plot_image(data,use_wcs=False,cmap_name='viridis'):
 	plt.tight_layout()
 	return fig, ax
 
+def query_gaia_source(coord, width, height, rp_mag_limit):
+	# query Gaia DR3 for all the sources in the field brighter than the calculated magnitude limit	
+	job = Gaia.launch_job_async("""
+									SELECT source_id, ra, ra_error, dec, dec_error, ref_epoch, pmra, pmra_error, pmdec, pmdec_error, parallax, parallax_error, parallax_over_error, ruwe, phot_bp_mean_mag, phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_flux, phot_bp_mean_flux_error, phot_g_mean_flux, phot_g_mean_flux_error, phot_rp_mean_flux, phot_rp_mean_flux_error, bp_rp, bp_g, g_rp, grvs_mag, grvs_mag_error, phot_variable_flag,radial_velocity, radial_velocity_error, non_single_star, teff_gspphot, logg_gspphot, mh_gspphot, rvs_spec_sig_to_noise
+									FROM gaiadr3.gaia_source as gaia
+									WHERE gaia.ra BETWEEN {} AND {} AND
+											gaia.dec BETWEEN {} AND {} AND
+											gaia.phot_rp_mean_mag <= {}
+									ORDER BY phot_rp_mean_mag ASC
+								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, rp_mag_limit)
+								)
+
+	res = job.get_results()
+	try:
+		res['SOURCE_ID'].name = 'source_id' # why does this sometimes get returned in all caps? 
+	except:
+		pass
+	return res 
+
+def query_gaia_source_local(coord, wcs, im_shape):
+	gaia_path = '/data/tierras/gaia_dr3/gaia_source/'
+	hpx_level = 6
+
+	# determine the ra/dec limits over which sources need to be retained
+	ra_min = np.min([wcs.pixel_to_world(0,0).ra.value, wcs.pixel_to_world(im_shape[1],0).ra.value])
+	ra_max = np.max([wcs.pixel_to_world(0,im_shape[0]).ra.value, wcs.pixel_to_world(im_shape[1],im_shape[0]).ra.value])
+	dec_min = np.min([wcs.pixel_to_world(im_shape[1],0).dec.value, wcs.pixel_to_world(im_shape[1],im_shape[0]).dec.value])
+	dec_max = np.min([wcs.pixel_to_world(0,0).dec.value, wcs.pixel_to_world(0,im_shape[0]).dec.value])
+
+	height = 3600*(dec_max-dec_min) * u.arcsec
+
+	# figure out which gaia files correspond to the desired sky query 
+	md5sum_file     = pd.read_csv(gaia_path+'_MD5SUM.txt', header=None, sep='\s+', names=['md5Sum', 'file'])
+	md5sum_file.drop(md5sum_file.tail(1).index,inplace=True) # The last row in the "_MD5SUM.txt" file in the DR3 directories includes the md5Sum value of the _MD5SUM.txt file
+
+	# Extract HEALPix level-8 from file name ======================================
+	healpix_8_min  = [int(file[file.find('_')+1:file.rfind('-')])     for file in md5sum_file['file']]
+	healpix_8_max  = [int(file[file.rfind('-')+1:file.rfind('.csv')]) for file in md5sum_file['file']]
+	reference_file = pd.DataFrame({'file':md5sum_file['file'], 'healpix8_min':healpix_8_min, 'healpix8_max':healpix_8_max}).reset_index(drop=True)
+
+	# Compute HEALPix levels 6,7, and 9 ===========================================
+	reference_file['healpix7_min'] = [inp >> 2 for inp in reference_file['healpix8_min']]
+	reference_file['healpix7_max'] = [inp >> 2 for inp in reference_file['healpix8_max']]
+
+	reference_file['healpix6_min'] = [inp >> 2 for inp in reference_file['healpix7_min']]
+	reference_file['healpix6_max'] = [inp >> 2 for inp in reference_file['healpix7_max']]
+
+	reference_file['healpix9_min'] = [inp << 2       for inp in reference_file['healpix8_min']]
+	reference_file['healpix9_max'] = [(inp << 2) + 3 for inp in reference_file['healpix8_max']]
+
+	# Generate reference file =====================================================
+	ncols          = ['file', 'healpix6_min', 'healpix6_max', 'healpix7_min', 'healpix7_max', 'healpix8_min', 'healpix8_max', 'healpix9_min', 'healpix9_max']
+	reference_file = reference_file[ncols]
+
+	hp             = HEALPix(nside=2**hpx_level, order='nested')
+	hp_cone_search = hp.cone_search_lonlat(coord.ra, coord.dec, radius=height.to(u.degree)) # i don't think a rectangular search is implemented
+
+	subset     = []
+	for index in reference_file.index:
+		row = reference_file.iloc[index]
+		hp_min, hp_max = row[f'healpix{hpx_level}_min'], row[f'healpix{hpx_level}_max']
+		if np.any(np.logical_and(hp_min <= hp_cone_search, hp_cone_search <= hp_max)):
+			bulk_file = row['file'].split('.csv')[0]+'_sub.fits'
+			subset.append(bulk_file)
+	
+	sources = []
+	for i in range(len(subset)):
+		hdul = fits.open(gaia_path+subset[i])
+		tab = Table(hdul[1].data)
+
+		source_inds = np.where((tab['ra'] > ra_min) & (tab['ra'] < ra_max) & (tab['dec'] > dec_min) & (tab['dec'] < dec_max) & (tab['phot_rp_mean_mag'] <= 17))[0]
+		if len(source_inds) > 0:
+			sources.append(tab[source_inds])
+
+			if i == 0:
+				res = sources[i]
+			else:
+				# if sources were found spanning multiple gaia files, we need to stitch them toghether
+				res = join(res, tab[source_inds], join_type='outer')
+	
+	try:
+		res['SOURCE_ID'].name = 'source_id' # why does this sometimes get returned in all caps? 
+	except:
+		pass
+	
+	# sort on rp mag
+	res.sort(keys='phot_rp_mean_mag')
+	return res 
+
+def query_bailer_jones(coord, width, height, rp_mag_limit):
+	job = Gaia.launch_job_async("""SELECT
+								source_id, r_med_geo, r_lo_geo, r_hi_geo, r_med_photogeo, r_lo_photogeo, r_hi_photogeo,
+								phot_g_mean_mag - 5 * LOG10(r_med_geo) + 5 AS qg_geo,
+								phot_g_mean_mag - 5 * LOG10(r_med_photogeo) + 5 AS gq_photogeo
+									FROM (
+										SELECT * FROM gaiadr3.gaia_source as gaia
+
+										WHERE gaia.ra BETWEEN {} AND {} AND
+											  gaia.dec BETWEEN {} AND {} AND
+							 				  gaia.phot_rp_mean_mag <= {}
+
+										OFFSET 0
+									) AS edr3
+									JOIN external.gaiaedr3_distance using(source_id)
+									ORDER BY phot_rp_mean_mag ASC
+								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, rp_mag_limit)
+								)
+	res2 = job.get_results()	
+	return res2
+
+def query_bailer_jones_local(wcs, im_shape):
+	bailerjones_path = '/data/tierras/gaia_dr3/bailer_jones/'
+
+	ra_min = np.min([wcs.pixel_to_world(0,0).ra.value, wcs.pixel_to_world(im_shape[1],0).ra.value])
+	ra_max = np.max([wcs.pixel_to_world(0,im_shape[0]).ra.value, wcs.pixel_to_world(im_shape[1],im_shape[0]).ra.value])
+	dec_min = np.min([wcs.pixel_to_world(im_shape[1],0).dec.value, wcs.pixel_to_world(im_shape[1],im_shape[0]).dec.value])
+	dec_max = np.min([wcs.pixel_to_world(0,0).dec.value, wcs.pixel_to_world(0,im_shape[0]).dec.value])
+
+	# now do the same thing for the bailer-jones data
+	bj_ra_start = np.floor(ra_min*10)/10
+	bj_ra_end = np.ceil(ra_max*10)/10
+	bj_file_ras = np.arange(bj_ra_start, bj_ra_end, 0.1)
+	bj_sources = []
+	for i in range(len(bj_file_ras)):
+		hdul = fits.open(bailerjones_path+f'gedr3dist_RA_{bj_file_ras[i]:.1f}.fits')
+		tab = Table(hdul[1].data, names=['source_id','ra','dec','r_med_geo','r_lo_geo','r_hi_geo','r_med_photogeo','r_lo_photogeo','r_hi_photogeo','flag'])
+		source_inds = np.where((tab['ra'] > ra_min) & (tab['ra'] < ra_max) & (tab['dec'] > dec_min) & (tab['dec'] < dec_max))[0]
+		if len(source_inds) > 0:
+			bj_sources.append(tab[source_inds])
+
+			if i == 0:
+				res2 = bj_sources[i]
+			else:
+				# if sources were found spanning multiple gaia files, we need to stitch them toghether
+				res2 = join(res2, tab[source_inds], join_type='outer')
+
+	return res2 
+
+
 def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01, rp_mag_limit=17):	
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
@@ -309,63 +450,29 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	# set up the region on sky that we'll query in Gaia
 	# to be safe, set the width/height to be a bit larger than the estimates from plate scale alone, and cut to sources that actually fall on the chip after the query is complete
 	#	after the query is complete
+
 	coord = SkyCoord(avg_central_ra*u.deg, avg_central_dec*u.deg)
 	width = u.Quantity(plate_scale*im_shape[0],u.arcsec)/np.cos(np.radians(avg_central_dec))
-	height = u.Quantity(plate_scale*im_shape[1],u.arcsec)
-
-	# use the exposure time calculator to get an estimate for the rp magnitude limit that will give the desired minimum SNR 
-	# this assumes that all the images are taken at the same exposure time
-	# rp_mags = np.arange(7,22,0.1)
-	# snrs = np.zeros(len(rp_mags))
-	# for ii in range(len(rp_mags)):
-	# 	rp_mag, snr, exptime = etc(rp_mag=rp_mags[ii], exptime=header['EXPTIME'])
-	# 	snrs[ii] = snr 
-	# mag_limit = rp_mags[np.argmin(abs(snrs-min_snr))]
-	# logger.debug(f'Using a Gaia Rp mag limit of {mag_limit:.1f} to get sources with a minimum SNR of {min_snr}')	
-
+	height = u.Quantity(plate_scale*im_shape[1],u.arcsec)	
 	logger.debug(f'Using a Gaia RP mag limit of {rp_mag_limit:.1f}.')
 
-	# query Gaia DR3 for all the sources in the field brighter than the calculated magnitude limit	
-	job = Gaia.launch_job_async("""
-									SELECT source_id, ra, ra_error, dec, dec_error, ref_epoch, pmra, pmra_error, pmdec, pmdec_error, parallax, parallax_error, parallax_over_error, ruwe, phot_bp_mean_mag, phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_flux, phot_bp_mean_flux_error, phot_g_mean_flux, phot_g_mean_flux_error, phot_rp_mean_flux, phot_rp_mean_flux_error, bp_rp, bp_g, g_rp, grvs_mag, grvs_mag_error, phot_variable_flag,radial_velocity, radial_velocity_error, non_single_star, teff_gspphot, logg_gspphot, mh_gspphot, rvs_spec_sig_to_noise
-									FROM gaiadr3.gaia_source as gaia
-									WHERE gaia.ra BETWEEN {} AND {} AND
-											gaia.dec BETWEEN {} AND {} AND
-											gaia.phot_rp_mean_mag <= {}
-									ORDER BY phot_rp_mean_mag ASC
-								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, rp_mag_limit)
-								)
-
-	res = job.get_results()
-	try:
-		res['SOURCE_ID'].name = 'source_id' # why does this sometimes get returned in all caps? 
-	except:
-		pass
-
+	# query gaia for sources
+	try: # try doing this locally first
+		res = query_gaia_source_local(coord, wcs, im_shape)
+	except: # if that fails, try querying the gaia archive
+		res = query_gaia_source(coord, width, height, rp_mag_limit)
+	
 	# Do a separate search for objects in the Bailer-Jones 'photogeo' catalog
-	job = Gaia.launch_job_async("""SELECT
-								source_id, r_med_geo, r_lo_geo, r_hi_geo, r_med_photogeo, r_lo_photogeo, r_hi_photogeo,
-								phot_g_mean_mag - 5 * LOG10(r_med_geo) + 5 AS qg_geo,
-								phot_g_mean_mag - 5 * LOG10(r_med_photogeo) + 5 AS gq_photogeo
-									FROM (
-										SELECT * FROM gaiadr3.gaia_source as gaia
-
-										WHERE gaia.ra BETWEEN {} AND {} AND
-											  gaia.dec BETWEEN {} AND {} AND
-							 				  gaia.phot_rp_mean_mag <= {}
-
-										OFFSET 0
-									) AS edr3
-									JOIN external.gaiaedr3_distance using(source_id)
-									ORDER BY phot_rp_mean_mag ASC
-								""".format(coord.ra.value-width.to(u.deg).value/2, coord.ra.value+width.to(u.deg).value/2, coord.dec.value-height.to(u.deg).value/2, coord.dec.value+height.to(u.deg).value/2, rp_mag_limit)
-								)
-	res2 = job.get_results()	
+	try:
+		res2 = query_bailer_jones_local(wcs, im_shape)
+	except:
+		res2 = query_bailer_jones(coord, width, height, rp_mag_limit)
 	
 	# add the Bailer-Jones data into the main table 
 	for key in res2.keys()[1:]:
 		res[key] = np.zeros(len(res))
 
+	# join the gaia source and bailer jones tables
 	for i in range(len(res)):
 		if res['source_id'][i] in res2['source_id']:
 			ind = np.where(res['source_id'][i] == res2['source_id'])[0][0]
@@ -375,39 +482,52 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 			for key in res2.keys()[1:]:
 				res[key][i] = np.nan
 
+	# add absolute magnitude calculations 
+	res['gq_geo'] = res['phot_g_mean_mag'] - 5*np.log10(res['r_med_geo']) + 5
+	res['gq_photogeo'] = res['phot_g_mean_mag'] - 5*np.log10(res['r_med_photogeo']) + 5
+
 	# cut to entries without masked pmra values; otherwise the crossmatch will break
-	problem_inds = np.where(res['pmra'].mask)[0]
+	try:
+		problem_inds = np.where(np.isnan(res['pmra']))[0]
+	except:
+		problem_inds = np.where(res['pmra'].mask)[0]
 
 	# set the pmra, pmdec, and parallax of those indices to 0
 	res['pmra'][problem_inds] = 0
 	res['pmdec'][problem_inds] = 0
 	res['parallax'][problem_inds] = 0
 
-	# perform a crossmatch with 2MASS
-	gaia_coords = SkyCoord(ra=res['ra'], dec=res['dec'], pm_ra_cosdec=res['pmra'], pm_dec=res['pmdec'], obstime=Time('2016',format='decimalyear'))
+	try:
+		gaia_coords = SkyCoord(ra=res['ra']*u.deg, dec=res['dec']*u.deg, pm_ra_cosdec=res['pmra']*u.mas/u.yr, pm_dec=res['pmdec']*u.mas/u.yr, obstime=Time(res['ref_epoch'],format='decimalyear'))
+	except:
+		# TODO: why is this except clause needed sometimes? 
+		# and NOTE that the forced ref epoch of '2016.0' is only valid for Gaia DR3 coordinates
+		gaia_coords = SkyCoord(ra=res['ra']*u.deg, dec=res['dec']*u.deg, pm_ra_cosdec=res['pmra'], pm_dec=res['pmdec'], obstime=Time('2016.0',format='decimalyear'))
 
 	# 20250131: removed 2MASS queries which were causing "OSError: [Errno 122] Disk Quota exceeded"...
 	# we don't really use 2MASS information so it's not necessary to include
 	# unclear to me why this error was occurring, though
 
-	viz = Vizier(catalog="II/246",columns=['*','Date'], row_limit=-1)
-	max_tries = 3
-	try_n = 0 
-	while try_n < max_tries:
-		try:
-			twomass_res = viz.query_region(coord, width=width, height=height)[0]
-			break
-		except:
-			# sometimes the cache needs to be removed for this to work. 
-			os.system('rm -rf ~/.astropy/cache/astroquery/Vizier')
-			try_n += 1
+	# viz = Vizier(catalog="II/246",columns=['*','Date'], row_limit=-1)
+	# max_tries = 3
+	# try_n = 0 
+	# while try_n < max_tries:
+	# 	try:
+	# 		twomass_res = viz.query_region(coord, width=width, height=height)[0]
+	# 		break
+	# 	except:
+	# 		# sometimes the cache needs to be removed for this to work. 
+	# 		os.system('rm -rf ~/.astropy/cache/astroquery/Vizier')
+	# 		try_n += 1
 	
-	twomass_coords = SkyCoord(twomass_res['RAJ2000'],twomass_res['DEJ2000'])
-	twomass_epoch = Time('2000-01-01')
-	gaia_coords_tm_epoch = gaia_coords.apply_space_motion(twomass_epoch)
+	# twomass_coords = SkyCoord(twomass_res['RAJ2000'],twomass_res['DEJ2000'])
+	# twomass_epoch = Time('2000-01-01')
+	# gaia_coords_tm_epoch = gaia_coords.apply_space_motion(twomass_epoch)
 	gaia_coords_tierras_epoch = gaia_coords.apply_space_motion(tierras_epoch)
 
-	idx_gaia, sep2d_gaia, _ = gaia_coords_tm_epoch.match_to_catalog_sky(twomass_coords)
+	
+	# idx_gaia, sep2d_gaia, _ = gaia_coords_tm_epoch.match_to_catalog_sky(twomass_coords)
+
 	#Now set problem indices back to NaNs
 	res['pmra'][problem_inds] = np.nan
 	res['pmdec'][problem_inds] = np.nan
@@ -416,28 +536,29 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	# figure out source positions in the Tierras epoch 
 	tierras_pixel_coords = wcs.world_to_pixel(gaia_coords_tierras_epoch)
 
-	# add 2MASS data and pixel positions to the source table
-	try:
-		# WHY does this sometimes get returned with a _ in front? 
-		res.add_column(twomass_res['_2MASS'][idx_gaia],name='2MASS',index=1)
-	except:
-		res.add_column(twomass_res['2MASS'][idx_gaia],name='2MASS',index=1)
+	# # add 2MASS data and pixel positions to the source table
+	# try:
+	# 	# WHY does this sometimes get returned with a _ in front? 
+	# 	res.add_column(twomass_res['_2MASS'][idx_gaia],name='2MASS',index=1)
+	# except:
+	# 	res.add_column(twomass_res['2MASS'][idx_gaia],name='2MASS',index=1)
 	res.add_column(tierras_pixel_coords[0],name='X pix', index=2)
 	res.add_column(tierras_pixel_coords[1],name='Y pix', index=3)
 	res.add_column(gaia_coords_tierras_epoch.ra, name='ra_tierras', index=4)
 	res.add_column(gaia_coords_tierras_epoch.dec, name='dec_tierras', index=5)
-	res['Jmag'] = twomass_res['Jmag'][idx_gaia]
-	res['e_Jmag'] = twomass_res['e_Jmag'][idx_gaia]
-	res['Hmag'] = twomass_res['Hmag'][idx_gaia]
-	res['e_Hmag'] = twomass_res['e_Hmag'][idx_gaia]
-	res['Kmag'] = twomass_res['Kmag'][idx_gaia]
-	res['e_Kmag'] = twomass_res['e_Kmag'][idx_gaia]
+	# res['Jmag'] = twomass_res['Jmag'][idx_gaia]
+	# res['e_Jmag'] = twomass_res['e_Jmag'][idx_gaia]
+	# res['Hmag'] = twomass_res['Hmag'][idx_gaia]
+	# res['e_Hmag'] = twomass_res['e_Hmag'][idx_gaia]
+	# res['Kmag'] = twomass_res['Kmag'][idx_gaia]
+	# res['e_Kmag'] = twomass_res['e_Kmag'][idx_gaia]
 
 	# check on the target and make sure it has a proper motion from Gaia 
 	hdr = fits.open(file_list[-1])[0].header
 	targ_x = hdr['CAT-X']
 	targ_y = hdr['CAT-Y']
-	closest_source = np.argmin(np.sqrt((res['X pix']-targ_x)**2 + (res['Y pix']-targ_y)**2))
+	closest_source = np.nanargmin(np.sqrt((res['X pix']-targ_x)**2 + (res['Y pix']-targ_y)**2))
+
 	if np.isnan(res['pmra'][closest_source]) or np.isnan(res['pmdec'][closest_source]):
 		logger.info('WARNING: The closest source to the CAT-X/Y position lacks proper motion measurements in Gaia DR3. Attempting to find them on Simbad.')
 		simbad = Simbad()
@@ -500,6 +621,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 		ax1.tick_params(labelsize=12)
 		plt.tight_layout()
 		breakpoint()	
+
 	# create the output dataframe consisting of the target as the 0th entry and the reference stars
 	output_table = copy.deepcopy(res)
 
