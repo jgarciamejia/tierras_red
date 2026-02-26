@@ -264,6 +264,7 @@ def query_gaia_source_local(coord, wcs, im_shape):
 			subset.append(bulk_file)
 	
 	sources = []
+	n = 0 	
 	for i in range(len(subset)):
 		hdul = fits.open(gaia_path+subset[i])
 		tab = Table(hdul[1].data)
@@ -272,11 +273,12 @@ def query_gaia_source_local(coord, wcs, im_shape):
 		if len(source_inds) > 0:
 			sources.append(tab[source_inds])
 
-			if i == 0:
+			if n == 0:
 				res = sources[i]
 			else:
 				# if sources were found spanning multiple gaia files, we need to stitch them toghether
 				res = join(res, tab[source_inds], join_type='outer')
+			n += 1
 	
 	try:
 		res['SOURCE_ID'].name = 'source_id' # why does this sometimes get returned in all caps? 
@@ -284,7 +286,11 @@ def query_gaia_source_local(coord, wcs, im_shape):
 		pass
 	
 	# sort on rp mag
-	res.sort(keys='phot_rp_mean_mag')
+	try:
+		res.sort(keys='phot_rp_mean_mag')
+	except:
+		print('local query failed???')
+		
 	return res 
 
 def query_bailer_jones(coord, width, height, rp_mag_limit):
