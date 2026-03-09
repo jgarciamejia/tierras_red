@@ -466,6 +466,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	try: # try doing this locally first
 		res = query_gaia_source_local(coord, wcs, im_shape)
 	except: # if that fails, try querying the gaia archive
+		logger.debug(f'Local Gaia query failed! Trying web query.')
 		res = query_gaia_source(coord, width, height, rp_mag_limit)
 	
 	# Do a separate search for objects in the Bailer-Jones 'photogeo' catalog
