@@ -329,7 +329,7 @@ def query_bailer_jones_local(wcs, im_shape):
 	bj_sources = []
 	for i in range(len(bj_file_ras)):
 		hdul = fits.open(bailerjones_path+f'gedr3dist_RA_{bj_file_ras[i]:.1f}.fits')
-		tab = Table(hdul[1].data, names=['source_id','ra','dec','r_med_geo','r_lo_geo','r_hi_geo','r_med_photogeo','r_lo_photogeo','r_hi_photogeo','flag'])
+		tab = Table(hdul[1].data, names=['source_id', 'ra', 'dec', 'r_med_geo','r_lo_geo','r_hi_geo','r_med_photogeo','r_lo_photogeo','r_hi_photogeo','flag'])
 		source_inds = np.where((tab['ra'] > ra_min) & (tab['ra'] < ra_max) & (tab['dec'] > dec_min) & (tab['dec'] < dec_max))[0]
 		if len(source_inds) > 0:
 			bj_sources.append(tab[source_inds])
@@ -339,7 +339,7 @@ def query_bailer_jones_local(wcs, im_shape):
 			else:
 				# if sources were found spanning multiple gaia files, we need to stitch them toghether
 				res2 = join(res2, tab[source_inds], join_type='outer')
-
+	res2.remove_columns(['ra', 'dec']) # do not want these, use ra/dec from main gaia query
 	return res2 
 
 
@@ -565,7 +565,6 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	targ_x = hdr['CAT-X']
 	targ_y = hdr['CAT-Y']
 	closest_source = np.nanargmin(np.sqrt((res['X pix']-targ_x)**2 + (res['Y pix']-targ_y)**2))
-
 	if np.isnan(res['pmra'][closest_source]) or np.isnan(res['pmdec'][closest_source]):
 		logger.info('WARNING: The closest source to the CAT-X/Y position lacks proper motion measurements in Gaia DR3. Attempting to find them on Simbad.')
 		simbad = Simbad()
@@ -616,7 +615,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	logger.debug(f'Removed {len(bad_inds_half)} sources that were too near the divide between the upper and lower detector halves.')
 
 	logger.info(f'Found {len(res)} sources!')
-	
+
 	if plot:
 		ax.plot(res['X pix'], res['Y pix'], marker='x', ls='', color='tab:red')
 
