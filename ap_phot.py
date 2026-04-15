@@ -217,7 +217,7 @@ def query_gaia_source(coord, width, height, rp_mag_limit):
 		pass
 	return res 
 
-def query_gaia_source_local(coord, wcs, im_shape):
+def query_gaia_source_local(coord, wcs, im_shape, logger=None):
 	gaia_path = '/data/tierras/gaia_dr3/gaia_source/'
 	hpx_level = 6
 
@@ -266,7 +266,16 @@ def query_gaia_source_local(coord, wcs, im_shape):
 	sources = []
 	n = 0 	
 	for i in range(len(subset)):
-		hdul = fits.open(gaia_path+subset[i])
+		try:
+			hdul = fits.open(gaia_path+subset[i])
+		except:
+			warn = f'WARNING: {subset[i]} not on disk skipping.\n You should download it from https://cdn.gea.esac.esa.int/?prefix=Gaia/gdr3/gaia_source/, extract it, place it in /data/tierras/gaia_dr3/gaia_source/, then run make_subset.py and convert_to_fits.py on it.'
+			if logger is not None:
+				logger.info(warn)
+			else:
+				print(warn)
+			continue
+
 		tab = Table(hdul[1].data)
 
 		source_inds = np.where((tab['ra'] > ra_min) & (tab['ra'] < ra_max) & (tab['dec'] > dec_min) & (tab['dec'] < dec_max) & (tab['phot_rp_mean_mag'] <= 17))[0]
@@ -274,11 +283,14 @@ def query_gaia_source_local(coord, wcs, im_shape):
 			sources.append(tab[source_inds])
 
 			if n == 0:
-				res = sources[i]
+				try:
+					res = sources[n]
+					n += 1
+				except:
+					breakpoint()
 			else:
 				# if sources were found spanning multiple gaia files, we need to stitch them toghether
 				res = join(res, tab[source_inds], join_type='outer')
-			n += 1
 	
 	try:
 		res['SOURCE_ID'].name = 'source_id' # why does this sometimes get returned in all caps? 
@@ -464,7 +476,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 
 	# query gaia for sources
 	try: # try doing this locally first
-		res = query_gaia_source_local(coord, wcs, im_shape)
+		res = query_gaia_source_local(coord, wcs, im_shape, logger=logger)
 	except: # if that fails, try querying the gaia archive
 		logger.debug(f'Local Gaia query failed! Trying web query.')
 		res = query_gaia_source(coord, width, height, rp_mag_limit)
@@ -509,7 +521,11 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	except:
 		# TODO: why is this except clause needed sometimes? 
 		# and NOTE that the forced ref epoch of '2016.0' is only valid for Gaia DR3 coordinates
-		gaia_coords = SkyCoord(ra=res['ra']*u.deg, dec=res['dec']*u.deg, pm_ra_cosdec=res['pmra'], pm_dec=res['pmdec'], obstime=Time('2016.0',format='decimalyear'))
+		try:
+			gaia_coords = SkyCoord(ra=res['ra']*u.deg, dec=res['dec']*u.deg, pm_ra_cosdec=res['pmra'], pm_dec=res['pmdec'], obstime=Time('2016.0',format='decimalyear'))
+		except:
+			# sometimes it also breaks when you multiply by deg, resulting in deg^2 units??? I have no idea why that would happen.
+			gaia_coords = SkyCoord(ra=res['ra'], dec=res['dec'], pm_ra_cosdec=res['pmra'], pm_dec=res['pmdec'], obstime=Time('2016.0',format='decimalyear'))
 
 	# 20250131: removed 2MASS queries which were causing "OSError: [Errno 122] Disk Quota exceeded"...
 	# we don't really use 2MASS information so it's not necessary to include
