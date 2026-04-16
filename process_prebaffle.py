@@ -85,17 +85,31 @@ def detect_fields(date, incoming_root):
         return []
 
     calibration_keywords = {'flat', 'dark', 'bias', 'zero', 'test', 'focus',
-                            'pointing', 'flat001', 'target', 'target_red'}
-    fields = set()
+                            'pointing', 'flat001', 'target', 'target_red',
+                            'warm'}
+    calibration_prefixes = ('FLAT', 'POINT', 'TEST')
+
+    # collect all target names with their file counts
+    target_counts = Counter()
     for f in files:
         basename = os.path.basename(f)
         parts = basename.split('.')
         if len(parts) < 4:
             continue
         target = parts[2]
-        if target.lower() not in calibration_keywords and not target.upper().startswith('FLAT') and 'TEST' not in target.upper():
-            fields.add(target)
+        if (target.lower() not in calibration_keywords
+                and not target.upper().startswith(calibration_prefixes)):
+            target_counts[target] += 1
 
+    # deduplicate case-insensitively: keep the casing with the most files
+    # e.g., GL905 (2 files) vs Gl905 (300 files) → keep Gl905
+    seen_lower = {}
+    for target, count in target_counts.items():
+        key = target.lower()
+        if key not in seen_lower or count > seen_lower[key][1]:
+            seen_lower[key] = (target, count)
+
+    fields = [v[0] for v in seen_lower.values()]
     return sorted(fields)
 
 
@@ -202,7 +216,7 @@ def extract_sky_data(date, field, ffname):
         phot_tab = pq.read_table(phot_files[0])
         sky_cols = [c for c in phot_tab.column_names if c.endswith(' Sky')]
         if sky_cols:
-            sky_arr = np.column_stack([phot_tab[c].to_numpy() for c in sky_cols]) # shape: (N exposures, M sources)
+            sky_arr = np.column_stack([phot_tab[c].to_numpy() for c in sky_cols])
             median_sky = np.nanmedian(sky_arr, axis=1)  # median across all sources
         else:
             logging.warning(f'    No sky columns found in photometry for {date}/{field}')
@@ -364,6 +378,8 @@ def main():
                     logging.info(f'    Extracted {len(sky_df)} exposures.')
                 else:
                     results['extraction_failed'].append(f'{date}/{field}')
+            elif not args.dry_run:
+                logging.info(f'    No photometry to extract from. Skipping extraction.')
 
     # --- Save combined sky data ---
     if all_sky_data and not args.dry_run:
