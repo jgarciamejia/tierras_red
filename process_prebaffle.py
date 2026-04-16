@@ -125,7 +125,7 @@ def run_sort_and_red(date, dry_run=False):
     We do NOT pass -f since there's no flat for pre-baffle data.
     """
     import subprocess
-    cmd = [sys.executable, '/home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py',
+    cmd = [sys.executable, '/home/jmejia/tierras/photometry/tierras_red/sort_and_red_crontab.py',
            '-date', date, '-ffname', FFNAME]
     logging.info(f'  sort_and_red cmd: {" ".join(cmd)}')
 
