@@ -40,6 +40,7 @@ def make_filelist(basepath,date,target):
 
 def get_target_list(datepath):
     flist = os.listdir(datepath)
+    flist = [f for f in os.listdir(datepath) if f.endswith('.fit')]
     target_list = set([flist[ind].split('.')[2] for ind in range(len(flist))])
     if 'FLAT001' in target_list:
         target_list = [targetname for targetname in target_list if not targetname.startswith('FLAT')]
