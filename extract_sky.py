@@ -24,6 +24,7 @@ Usage:
 """
 
 import argparse
+import gc
 import logging
 import os
 import sys
@@ -143,6 +144,23 @@ def extract_one_frame(red_path, date, field, in_excluded):
     return row
 
 
+def already_processed_dates(output_path):
+    """Return set of YYYYMMDD strings already present in an existing output CSV.
+
+    Lets the script resume after a crash: invoke with the same --output and dates
+    already written are skipped. Returns empty set if the file doesn't exist or
+    can't be read.
+    """
+    if not os.path.exists(output_path):
+        return set()
+    try:
+        existing = pd.read_csv(output_path, usecols=['date'])
+        return set(existing['date'].astype(str).unique())
+    except Exception as e:
+        logging.warning(f'could not read existing output {output_path} for resume check: {e}')
+        return set()
+
+
 def iter_fields(date, ffname, include_calibration_fields):
     """Yield (field_name, flat_dir, excluded_dir) for each field dir on a date."""
     date_root = os.path.join(FLATTENED_ROOT, date)
@@ -182,11 +200,18 @@ def main():
     logging.info(f'extract_sky: {len(dates)} dates, ffname={args.ffname}, '
                  f'output={args.output}')
 
-    rows = []
+    done_dates = already_processed_dates(args.output)
+    if done_dates:
+        logging.info(f'Resume: {len(done_dates)} dates already in output, will skip them')
+
+    total_written = 0
     for i, date in enumerate(dates, 1):
         logging.info(f'[{i}/{len(dates)}] {date}')
-        date_rows_before = len(rows)
+        if date in done_dates:
+            logging.info(f'  already in output, skipping')
+            continue
 
+        date_rows = []
         for field, flat_dir, excluded_dir in iter_fields(
                 date, args.ffname, args.include_calibration_fields):
             flat_files = sorted(glob(os.path.join(flat_dir, '*_red.fit')))
@@ -199,21 +224,25 @@ def main():
             for rf in flat_files:
                 row = extract_one_frame(rf, date, field, in_excluded=False)
                 if row is not None:
-                    rows.append(row)
+                    date_rows.append(row)
             for rf in excluded_files:
                 row = extract_one_frame(rf, date, field, in_excluded=True)
                 if row is not None:
-                    rows.append(row)
+                    date_rows.append(row)
 
-        logging.info(f'  → {len(rows) - date_rows_before} exposures from {date}')
+        logging.info(f'  → {len(date_rows)} exposures from {date}')
 
-    if not rows:
-        logging.warning('No rows extracted. Nothing written.')
-        return
+        # Flush this date's rows to disk immediately so a crash mid-run doesn't
+        # lose everything. Append mode with a header only on first write.
+        if date_rows:
+            df = pd.DataFrame(date_rows)
+            file_exists = os.path.exists(args.output)
+            df.to_csv(args.output, mode='a', header=not file_exists, index=False)
+            total_written += len(date_rows)
+            del df, date_rows
+            gc.collect()
 
-    df = pd.DataFrame(rows)
-    df.to_csv(args.output, index=False)
-    logging.info(f'Wrote {len(df)} rows to {args.output}')
+    logging.info(f'Done. Wrote {total_written} new rows to {args.output}')
 
 
 if __name__ == '__main__':
