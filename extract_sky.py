@@ -37,12 +37,14 @@ import pandas as pd
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-# Self-impose a 2 GB virtual-memory ceiling. If the script ever tries to
-# allocate beyond this, Python raises MemoryError with a clear traceback
-# rather than growing unbounded and triggering an OOM kill / dragging cafecol
-# to a halt. Peak observed RSS in normal operation is ~150 MB, so 2 GB gives
-# ~13x headroom for transient spikes.
-_MEM_LIMIT_BYTES = 2 * 1024**3
+# Self-impose an 8 GB virtual-memory ceiling. RLIMIT_AS limits the virtual
+# address space (not RSS) — numpy/astropy reserve a lot of virtual memory
+# in their allocator pools well above actual resident usage, so the cap
+# needs to accommodate that. Observed RSS in normal operation is ~150 MB;
+# observed VSZ is several hundred MB and grows with allocator fragmentation
+# over many iterations. 8 GB is comfortably above that, still ~half of
+# cafecol's 15 GB RAM, and tight enough to trip a runaway process.
+_MEM_LIMIT_BYTES = 8 * 1024**3
 try:
     resource.setrlimit(resource.RLIMIT_AS, (_MEM_LIMIT_BYTES, _MEM_LIMIT_BYTES))
 except (ValueError, OSError):
