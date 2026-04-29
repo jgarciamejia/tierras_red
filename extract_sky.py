@@ -27,6 +27,7 @@ import argparse
 import gc
 import logging
 import os
+import resource
 import sys
 from datetime import datetime
 from glob import glob
@@ -35,6 +36,18 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
+
+# Self-impose a 2 GB virtual-memory ceiling. If the script ever tries to
+# allocate beyond this, Python raises MemoryError with a clear traceback
+# rather than growing unbounded and triggering an OOM kill / dragging cafecol
+# to a halt. Peak observed RSS in normal operation is ~150 MB, so 2 GB gives
+# ~13x headroom for transient spikes.
+_MEM_LIMIT_BYTES = 2 * 1024**3
+try:
+    resource.setrlimit(resource.RLIMIT_AS, (_MEM_LIMIT_BYTES, _MEM_LIMIT_BYTES))
+except (ValueError, OSError):
+    # Not supported on every platform (Windows, some BSDs). Silent fallback.
+    pass
 
 FLATTENED_ROOT = '/data/tierras/flattened'
 DEFAULT_FFNAME = 'flat0000'
