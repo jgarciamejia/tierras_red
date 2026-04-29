@@ -2,46 +2,57 @@
 """
 pick_post_baffle_nights.py
 
-Augment a compute_nightly_moon.py CSV with incoming-frame counts (only on
-machines where /data/tierras is mounted, e.g. cafecol), then choose a
+Augment a compute_nightly_moon.py CSV with per-date file counts (run on
+cafecol or any machine where /data/tierras is mounted), then choose a
 stratified sample of nights matched to the pre-baffle moon-illumination
 range plus a few high-illumination context nights. Output is a date list
-ready to feed to `extract_sky.py --dates`.
+ready to feed to `extract_sky.py --dates` or `extract_sky_from_phot.py`.
 
-Selection strategy
-------------------
-1. Drop nights with fewer than --min-frames *.fit files in incoming/.
-2. Within illumination [--illum-min, --illum-max], divide into --n-bins
+Required-data filtering
+-----------------------
+Three optional --*-root flags. If provided, the corresponding count column
+is computed AND becomes a hard requirement for selection (only nights
+satisfying ALL provided requirements end up in the candidate pool):
+
+  --incoming-root  /data/tierras/incoming    → n_incoming_frames >= --min-frames
+  --flattened-root /data/tierras/flattened   → n_reduced_frames  >= --min-reduced
+  --photometry-root /data/tierras/photometry → n_phot_parquets   >= --min-parquets
+
+The strict version (all three) guarantees that picked nights have raw,
+reduced, AND photometry data on disk — so downstream extraction (whether
+from FITS or from existing parquets) is guaranteed to succeed.
+
+Selection strategy (within the candidate pool)
+----------------------------------------------
+1. Within illumination [--illum-min, --illum-max], divide into --n-bins
    bins. From each bin, pick --per-bin nights spread across
    moon_peak_altitude_deg_during_night for altitude diversity. Spread is
    deterministic (linear-spaced indices on the bin sorted by peak alt) —
    no random seed, fully reproducible.
-3. Add --high-illum-n nights from illum >= --high-illum-min, also spread
+2. Add --high-illum-n nights from illum >= --high-illum-min, also spread
    across peak altitude.
 
 If you don't like the auto pick, edit the resulting <output> dates.txt by
-hand (one YYYYMMDD per line, '#' for comments) — that's all extract_sky.py
-needs.
+hand (one YYYYMMDD per line, '#' for comments).
 
-Usage (on cafecol)
-------------------
+Usage (on cafecol, with all three requirements)
+-----------------------------------------------
     python pick_post_baffle_nights.py \\
         --input moon_telbaffle.csv \\
         --incoming-root /data/tierras/incoming \\
+        --flattened-root /data/tierras/flattened \\
+        --photometry-root /data/tierras/photometry \\
         --output tel_baffle_dates.txt \\
-        --plot-output moon_telbaffle_selection.png
-
-    python pick_post_baffle_nights.py \\
-        --input moon_bothbaffles.csv \\
-        --incoming-root /data/tierras/incoming \\
-        --output both_baffles_dates.txt \\
-        --plot-output moon_bothbaffles_selection.png
+        --plot-output moon_telbaffle_selection.png \\
+        --illum-min 0.0 --illum-max 1.0 --n-bins 6 --per-bin 3 \\
+        --high-illum-n 1 --high-illum-min 0.95
 """
 
 import argparse
 import logging
 import os
 import sys
+from glob import glob
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -62,6 +73,28 @@ def count_incoming_frames(incoming_root, date_str):
     if not os.path.isdir(date_dir):
         return 0, False
     return sum(1 for f in os.listdir(date_dir) if f.endswith('.fit')), True
+
+
+def count_reduced_frames(flattened_root, date_str, ffname='flat0000'):
+    """Total *_red.fit across all field subdirectories on a date.
+
+    /data/tierras/flattened/<date>/<field>/<ffname>/*_red.fit
+    """
+    date_dir = os.path.join(flattened_root, str(date_str))
+    if not os.path.isdir(date_dir):
+        return 0
+    return len(glob(os.path.join(date_dir, '*', ffname, '*_red.fit')))
+
+
+def count_photometry_parquets(photometry_root, date_str, ffname='flat0000'):
+    """Total *phot*.parquet across all field subdirectories on a date.
+
+    /data/tierras/photometry/<date>/<field>/<ffname>/*phot*.parquet
+    """
+    date_dir = os.path.join(photometry_root, str(date_str))
+    if not os.path.isdir(date_dir):
+        return 0
+    return len(glob(os.path.join(date_dir, '*', ffname, '*phot*.parquet')))
 
 
 def select_within_bin(group, n, sort_by='moon_peak_altitude_deg_during_night'):
@@ -109,10 +142,26 @@ def main():
                     help='Path to /data/tierras/incoming. If given, '
                          'n_incoming_frames is (re-)computed and the input '
                          'CSV is updated in place.')
+    ap.add_argument('--flattened-root', default=None,
+                    help='Path to /data/tierras/flattened. If given, count '
+                         'n_reduced_frames per date and require >= --min-reduced '
+                         'for selection.')
+    ap.add_argument('--photometry-root', default=None,
+                    help='Path to /data/tierras/photometry. If given, count '
+                         'n_phot_parquets per date and require >= --min-parquets '
+                         'for selection.')
+    ap.add_argument('--ffname', default='flat0000',
+                    help='Name of the flattened/photometry subdir (default flat0000)')
     ap.add_argument('--output', required=True, help='Output dates.txt')
     ap.add_argument('--plot-output', default=None, help='Optional plot PNG')
     ap.add_argument('--min-frames', type=int, default=30,
                     help='Drop nights with fewer than this many incoming frames')
+    ap.add_argument('--min-reduced', type=int, default=30,
+                    help='When --flattened-root is given, require this many '
+                         'reduced *_red.fit files')
+    ap.add_argument('--min-parquets', type=int, default=1,
+                    help='When --photometry-root is given, require this many '
+                         '*phot*.parquet files (1 means "any photometry exists")')
     ap.add_argument('--illum-min', type=float, default=0.05,
                     help='Lower bound for stratified illumination range')
     ap.add_argument('--illum-max', type=float, default=0.75,
@@ -138,32 +187,59 @@ def main():
         results = df['date'].map(lambda d: count_incoming_frames(args.incoming_root, d))
         df['n_incoming_frames'] = results.map(lambda t: t[0])
         df['incoming_dir_exists'] = results.map(lambda t: t[1])
+        logging.info(f'  done')
+
+    if args.flattened_root:
+        logging.info(f'Counting reduced frames under {args.flattened_root}/<date>/<field>/{args.ffname}/ ...')
+        df['n_reduced_frames'] = df['date'].map(
+            lambda d: count_reduced_frames(args.flattened_root, d, args.ffname))
+        logging.info(f'  done')
+
+    if args.photometry_root:
+        logging.info(f'Counting photometry parquets under {args.photometry_root}/<date>/<field>/{args.ffname}/ ...')
+        df['n_phot_parquets'] = df['date'].map(
+            lambda d: count_photometry_parquets(args.photometry_root, d, args.ffname))
+        logging.info(f'  done')
+
+    if (args.incoming_root or args.flattened_root or args.photometry_root):
         df.to_csv(args.input, index=False)
-        logging.info(f'Updated {args.input} with n_incoming_frames + incoming_dir_exists')
+        logging.info(f'Updated {args.input} with new count columns')
 
     if 'n_incoming_frames' not in df.columns or df.n_incoming_frames.isna().all():
         logging.error('CSV has no n_incoming_frames. Re-run with --incoming-root.')
         sys.exit(1)
 
+    # Build the usable mask, AND-ing in each requirement that has been computed
     n_total = len(df)
+    usable_mask = df.n_incoming_frames >= args.min_frames
+
+    logging.info(f'{n_total} nights total:')
     if 'incoming_dir_exists' in df.columns:
         n_no_dir = int((~df.incoming_dir_exists.astype(bool)).sum())
-    else:
-        # CSV from older run without the dir-existence column; can't tell empty-dir vs no-dir
-        n_no_dir = int((df.n_incoming_frames == 0).sum())
-    n_with_dir_no_data = int(((df.n_incoming_frames == 0) &
-                              (df.get('incoming_dir_exists', True) == True)).sum()) \
-        if 'incoming_dir_exists' in df.columns else 0
+        logging.info(f'  {n_no_dir} closed (no incoming/<date>/ — monsoon, weather, etc.)')
     n_with_data = int((df.n_incoming_frames > 0).sum())
-    n_usable = int((df.n_incoming_frames >= args.min_frames).sum())
-    logging.info(f'{n_total} nights total:')
-    logging.info(f'  {n_no_dir} closed (no incoming/<date>/ — monsoon, weather, etc.)')
-    if n_with_dir_no_data:
-        logging.info(f'  {n_with_dir_no_data} with directory but 0 *.fit files (aborted/error nights)')
-    logging.info(f'  {n_with_data} with any frames')
-    logging.info(f'  {n_usable} with >= {args.min_frames} frames (usable for selection)')
+    logging.info(f'  {n_with_data} with any incoming frames')
+    n_pass_incoming = int((df.n_incoming_frames >= args.min_frames).sum())
+    logging.info(f'  {n_pass_incoming} pass incoming >= {args.min_frames}')
 
-    usable = df[df.n_incoming_frames >= args.min_frames].copy()
+    if 'n_reduced_frames' in df.columns:
+        n_no_reduced = int((df.n_reduced_frames == 0).sum())
+        n_pass_reduced = int((df.n_reduced_frames >= args.min_reduced).sum())
+        logging.info(f'  {n_no_reduced} have no reduced *_red.fit files')
+        logging.info(f'  {n_pass_reduced} pass reduced >= {args.min_reduced}')
+        usable_mask &= df.n_reduced_frames >= args.min_reduced
+
+    if 'n_phot_parquets' in df.columns:
+        n_no_phot = int((df.n_phot_parquets == 0).sum())
+        n_pass_phot = int((df.n_phot_parquets >= args.min_parquets).sum())
+        logging.info(f'  {n_no_phot} have no photometry parquets')
+        logging.info(f'  {n_pass_phot} pass parquets >= {args.min_parquets}')
+        usable_mask &= df.n_phot_parquets >= args.min_parquets
+
+    n_usable = int(usable_mask.sum())
+    logging.info(f'  {n_usable} usable for selection (intersection of all requirements)')
+
+    usable = df[usable_mask].copy()
 
     # Stratified selection within the illumination range
     in_range = usable[(usable.moon_illumination >= args.illum_min) &
