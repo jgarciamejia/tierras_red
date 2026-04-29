@@ -27,7 +27,6 @@ import argparse
 import gc
 import logging
 import os
-import resource
 import sys
 from datetime import datetime
 from glob import glob
@@ -37,19 +36,11 @@ import pandas as pd
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-# Self-impose an 8 GB virtual-memory ceiling. RLIMIT_AS limits the virtual
-# address space (not RSS) — numpy/astropy reserve a lot of virtual memory
-# in their allocator pools well above actual resident usage, so the cap
-# needs to accommodate that. Observed RSS in normal operation is ~150 MB;
-# observed VSZ is several hundred MB and grows with allocator fragmentation
-# over many iterations. 8 GB is comfortably above that, still ~half of
-# cafecol's 15 GB RAM, and tight enough to trip a runaway process.
-_MEM_LIMIT_BYTES = 8 * 1024**3
-try:
-    resource.setrlimit(resource.RLIMIT_AS, (_MEM_LIMIT_BYTES, _MEM_LIMIT_BYTES))
-except (ValueError, OSError):
-    # Not supported on every platform (Windows, some BSDs). Silent fallback.
-    pass
+# Memory hygiene relies on running per-date in a shell loop (one Python
+# process per night, exits and releases everything between nights) plus
+# nice/ionice for politeness on shared hosts. An RLIMIT_AS cap was tried
+# but caused false-positive failures from numpy/astropy allocator-pool
+# fragmentation; the per-date shell loop is the durable solution.
 
 FLATTENED_ROOT = '/data/tierras/flattened'
 DEFAULT_FFNAME = 'flat0000'
