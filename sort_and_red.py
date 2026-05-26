@@ -98,6 +98,8 @@ for ifile,filename in enumerate(filelist):
 # Exclude files where ASTROM solution fails and exptime diff. to mode of stack
 logging.info('Checking astrometric solution on plate solved files...')
 
+is_thwomp = len(make_filelist(ipath, date, f'{target}_ref')) > 0
+
 exptimes = np.array([])
 badfiles = np.array([])
 stdcrms_lst = np.array([])
@@ -115,13 +117,17 @@ for irfile,rfilename in enumerate(rfilelist):
     exptimes = np.append(exptimes, exptime)
 
     # read out astrometric fit coordinate rms (arcsec)
-    # and number of astrometric standards used. 
+    # and number of astrometric standards used.
     try:
         stdcrms, numbrms = hdr['STDCRMS'], hdr['NUMBRMS']
     except KeyError:
-        logging.info('Astrom failed for:')
-        logging.info(rfilename)
-        badfiles = np.append(badfiles,rfilename)
+        if is_thwomp and 'CRVAL1' in hdr and 'CRVAL2' in hdr:
+            logging.info('THWOMP field lacks STDCRMS/NUMBRMS but has WCS; retaining:')
+            logging.info(rfilename)
+        else:
+            logging.info('Astrom failed for:')
+            logging.info(rfilename)
+            badfiles = np.append(badfiles,rfilename)
         continue
     stdcrms_lst = np.append(stdcrms_lst,stdcrms)
     numbrms_lst = np.append(numbrms_lst, numbrms)
