@@ -2749,8 +2749,14 @@ def main(raw_args=None):
 	# ap_rad_hi = args.ap_rad_hi 
 	# ap_radii = np.arange(ap_rad_lo, ap_rad_hi + 1)
 	ap_radii =  np.array([np.round(float(i),1) for i in args.ap_radii])
-	an_in = args.an_in 
-	an_out = args.an_out 
+	an_in = args.an_in
+	an_out = args.an_out
+
+	# THWOMP targets are defocused; use larger annuli to clear the target PSF
+	if Path(f'/data/tierras/flattened/{date}/{target}_ref').exists():
+		an_in = 90
+		an_out = 180
+
 	edge_limit = args.edge_limit
 	centroid = t_or_f(args.centroid)
 	interpolate_cosmics = t_or_f(args.interpolate_cosmics)
