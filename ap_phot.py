@@ -862,7 +862,7 @@ def generate_square_cutout(image, position, size):
 
 	return cutout, position_in_cutout
 
-def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35, an_out=55, phot_type='fixed', centroid=False, centroid_type='centroid_2dg', interpolate_cosmics=False):
+def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35, an_out=55, phot_type='fixed', centroid=False, centroid_type='centroid_2dg', interpolate_cosmics=False, is_thwomp=False):
 	"""
 	Does circular aperture photometry on sources in a list of reduced Tierras images for an array of aperture sizes. Writes out photometry csv files to /data/tierras/lightcurves/date/target/ffname/.
 
@@ -1167,11 +1167,11 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		tcent = time.time()
 		source_wcs = WCS(source_header)
 
-		logger.debug(f'RMS of astrometric solution: {source_header["STDCRMS"]:.4f} arcsec')
-
-		if (source_header['STDCRMS'] > PLATE_SCALE/2):
-			logger.info(f'WARNING: header indicates astrometric solution with RMS of {source_header["STDCRMS"]}, WCS positions may not be accurate.')
-			wcs_flags[i] = 1
+		if not is_thwomp: # thwomp images may not have STDCRMS keywords in header
+			logger.debug(f'RMS of astrometric solution: {source_header["STDCRMS"]:.4f} arcsec')
+			if (source_header['STDCRMS'] > PLATE_SCALE/2):
+				logger.info(f'WARNING: header indicates astrometric solution with RMS of {source_header["STDCRMS"]}, WCS positions may not be accurate.')
+				wcs_flags[i] = 1
 
 		# transformed_pixel_coordinates = np.array([source_wcs.world_to_pixel((SkyCoord(sources['ra_tierras'][i]*u.deg, sources['dec_tierras'][i]*u.deg))) for i in range(n_sources)])
 
@@ -2752,10 +2752,13 @@ def main(raw_args=None):
 	an_in = args.an_in
 	an_out = args.an_out
 
-	# THWOMP targets are defocused; use larger annuli to clear the target PSF
+	# THWOMP targets are defocused; use larger annuli and aperture range
+	is_thwomp = False
 	if Path(f'/data/tierras/flattened/{date}/{target}_ref').exists():
+		is_thwomp = True
 		an_in = 90
 		an_out = 180
+		ap_radii = np.arange(15, 41, dtype='float')
 
 	edge_limit = args.edge_limit
 	centroid = t_or_f(args.centroid)
@@ -2818,7 +2821,7 @@ def main(raw_args=None):
 	measure_fwhm_grid(date, target, ffname, sources)
 
 	# do photometry 
-	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, phot_type=phot_type, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False)
+	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, phot_type=phot_type, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False, is_thwomp=is_thwomp)
 
 	
 	# close the logger
