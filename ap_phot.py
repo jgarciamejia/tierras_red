@@ -23,6 +23,8 @@ from astropy.time import Time
 from astropy.table import Table, QTable, join
 from astropy.nddata import NDData
 import astropy.units as u 
+from astropy import log as astropy_log
+astropy_log.setLevel('ERROR') # ignore esa status messages
 from astroquery.gaia import Gaia
 Gaia.MAIN_GAIA_TABLE = 'gaiadr3.gaia_source'
 from astroquery.vizier import Vizier
@@ -882,18 +884,17 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	"""
 
 	# set up centroid function
-	if centroid:
-		centroid_type = centroid_type.lower()
-		if centroid_type == 'centroid_1dg':
-			centroid_func = centroid_1dg
-		elif centroid_type == 'centroid_2dg':
-			centroid_func = centroid_2dg
-		elif centroid_type == 'centroid_com':
-			centroid_func = centroid_com
-		elif centroid_type == 'centroid_quadratic':
-			centroid_func = centroid_quadratic
-		else:
-			raise RuntimeError("centroid_type must be one of 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.")
+	centroid_type = centroid_type.lower()
+	if centroid_type == 'centroid_1dg':
+		centroid_func = centroid_1dg
+	elif centroid_type == 'centroid_2dg':
+		centroid_func = centroid_2dg
+	elif centroid_type == 'centroid_com':
+		centroid_func = centroid_com
+	elif centroid_type == 'centroid_quadratic':
+		centroid_func = centroid_quadratic
+	else:
+		raise RuntimeError("centroid_type must be one of 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.")
 	
 	ffname = file_list[0].parent.name	
 	target = file_list[0].parent.parent.name
@@ -1015,7 +1016,11 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 
 	# declare a circular footprint in case centroiding is performed
 	# only data within a radius of x pixels around the expected source positions from WCS will be considered for centroiding
-	centroid_footprint = circular_footprint(5)
+		
+	if is_thwomp: # thwomp images are defocused so need larger cutouts for centroid measurements
+		centroid_footprint = circular_footprint(60)
+	else:
+		centroid_footprint = circular_footprint(5)
 
 	logger.info(f'Doing {phot_type}-radius circular aperture photometry on {n_files} images with aperture radii of {ap_radii} pixels, an inner annulus radius of {an_in} pixels, and an outer annulus radius of {an_out} pixels.')
 
@@ -1195,7 +1200,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		
 		# # logger.debug(f'Source x (WCS): {[f"{item:.2f}" for item in source_x[:,i]]}')
 		# logger.debug(f'Source y (WCS): {[f"{item:.2f}" for item in source_y[:,i]]}')
-		if centroid:
+		if centroid or is_thwomp: # always centroid thwomp targets, the WCS is not generally reliable
 			# mask any pixels in the image above the non-linear threshold
 			mask = np.zeros(np.shape(source_data), dtype='bool')
 			mask[np.where(source_data>NONLINEAR_THRESHOLD)] = 1
@@ -2734,7 +2739,7 @@ def main(raw_args=None):
 	ap.add_argument("-an_out", required=False, default=55, help='Outer background annulus radius in pixels.', type=float)
 	ap.add_argument("-edge_limit",required=False,default=20,help="Minimum separation a source has from the detector edge to be considered as a reference star.",type=float)
 	ap.add_argument("-centroid",required=False,default=False,help="Whether or not to centroid during aperture photometry.",type=str)
-	ap.add_argument("-centroid_type",required=False,default='centroid_1dg',help="Photutils centroid function. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.",type=str)
+	ap.add_argument("-centroid_type",required=False,default='centroid_2dg',help="Photutils centroid function. Can be 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.",type=str)
 	ap.add_argument("-interpolate_cosmics",required=False,default=False,help="Whether or not to identify and interpolate cosmic ray hits (not working at present!)")
 	ap.add_argument("-rp_mag_limit", required=False, default=17, type=float, help="Gaia Rp magnitude limit for source identification.")
 	ap.add_argument("-phot_type", required=False, default='fixed', type=str, help="'fixed' or 'variable'. Determines whether photometry is performed with fixed apertures or with apertures that vary with the measured seeing FWHM.")
@@ -2756,9 +2761,9 @@ def main(raw_args=None):
 	is_thwomp = False
 	if Path(f'/data/tierras/flattened/{date}/{target}_ref').exists():
 		is_thwomp = True
-		an_in = 90
-		an_out = 180
-		ap_radii = np.arange(15, 41, dtype='float')
+		an_in = 140
+		an_out = 210
+		ap_radii = np.arange(40, 131, dtype='float')
 
 	edge_limit = args.edge_limit
 	centroid = t_or_f(args.centroid)
@@ -2819,6 +2824,10 @@ def main(raw_args=None):
 	
 	# measure fwhm on grid of stars spread across the images
 	measure_fwhm_grid(date, target, ffname, sources)
+
+	# if we're analyzing a thwomp field, just do photometry on the target, which should always be the brightest star (so first in the source df)
+	if is_thwomp:
+		sources = sources.head(1) 
 
 	# do photometry 
 	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, phot_type=phot_type, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False, is_thwomp=is_thwomp)
