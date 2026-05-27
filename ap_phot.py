@@ -2828,6 +2828,11 @@ def main(raw_args=None):
 	# if we're analyzing a thwomp field, just do photometry on the target, which should always be the brightest star (so first in the source df)
 	if is_thwomp:
 		sources = sources.head(1) 
+		
+		# overwrite the source df
+		source_path = f'/data/tierras/photometry/{date}/{target}/{ffname}/{date}_{target}_sources.csv'
+		sources.to_csv(source_path, index=0)
+		set_tierras_permissions(source_path)
 
 	# do photometry 
 	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, phot_type=phot_type, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False, is_thwomp=is_thwomp)
