@@ -2701,28 +2701,29 @@ def measure_fwhm_grid(date, field, ffname, sources, box_size=512):
 
 	# write out measurements to ancillary file 
 	ancillary_path = f'/data/tierras/photometry/{date}/{field}/{ffname}/{date}_{field}_ancillary_data.parquet'
-	if os.path.exists(ancillary_path):
-		ancillary_tab = pq.read_table(ancillary_path)
-		# if columns already present, remove so they can be updated
-		if 'FWHM X' in ancillary_tab.column_names:
-			column_ind = np.where(np.array(ancillary_tab.column_names) == 'FWHM X')[0][0]
-			ancillary_tab = ancillary_tab.remove_column(column_ind)
-		if 'FWHM Y' in ancillary_tab.column_names:
-			column_ind = np.where(np.array(ancillary_tab.column_names) == 'FWHM Y')[0][0]
-			ancillary_tab = ancillary_tab.remove_column(column_ind)
-		if 'Theta' in ancillary_tab.column_names:
-			column_ind = np.where(np.array(ancillary_tab.column_names) == 'Theta')[0][0]
-			ancillary_tab = ancillary_tab.remove_column(column_ind)	
-		# append new measurements
-		ancillary_tab = ancillary_tab.append_column('FWHM X', [np.round(fwhm_x,2)])
-		ancillary_tab = ancillary_tab.append_column('FWHM Y', [np.round(fwhm_y,2)])
-		ancillary_tab = ancillary_tab.append_column('Theta', [np.round(theta,2)])
-		pq.write_table(ancillary_tab, ancillary_path)
-		set_tierras_permissions(ancillary_path)
-	else:
-		ancillary_tab = pa.Table.from_arrays([np.round(fwhm_x, 2), np.round(fwhm_y, 2), np.round(theta, 2)], names=['FWHM X', 'FWHM Y', 'Theta'])
-		pq.write_table(ancillary_tab, ancillary_path)
-		set_tierras_permissions(ancillary_path)
+	# if os.path.exists(ancillary_path):
+	# 	ancillary_tab = pq.read_table(ancillary_path)
+	# 	# if columns already present, remove so they can be updated
+	# 	if 'FWHM X' in ancillary_tab.column_names:
+	# 		column_ind = np.where(np.array(ancillary_tab.column_names) == 'FWHM X')[0][0]
+	# 		ancillary_tab = ancillary_tab.remove_column(column_ind)
+	# 	if 'FWHM Y' in ancillary_tab.column_names:
+	# 		column_ind = np.where(np.array(ancillary_tab.column_names) == 'FWHM Y')[0][0]
+	# 		ancillary_tab = ancillary_tab.remove_column(column_ind)
+	# 	if 'Theta' in ancillary_tab.column_names:
+	# 		column_ind = np.where(np.array(ancillary_tab.column_names) == 'Theta')[0][0]
+	# 		ancillary_tab = ancillary_tab.remove_column(column_ind)	
+	# 	# append new measurements
+	# 	ancillary_tab = ancillary_tab.append_column('FWHM X', [np.round(fwhm_x,2)])
+	# 	ancillary_tab = ancillary_tab.append_column('FWHM Y', [np.round(fwhm_y,2)])
+	# 	ancillary_tab = ancillary_tab.append_column('Theta', [np.round(theta,2)])
+	# 	pq.write_table(ancillary_tab, ancillary_path)
+	# 	set_tierras_permissions(ancillary_path)
+	# else:
+	ancillary_tab = pa.Table.from_arrays([np.round(fwhm_x, 2), np.round(fwhm_y, 2), np.round(theta, 2)], names=['FWHM X', 'FWHM Y', 'Theta'])
+	pq.write_table(ancillary_tab, ancillary_path)
+	set_tierras_permissions(ancillary_path)
+	
 	return 	
 
 
@@ -2828,7 +2829,7 @@ def main(raw_args=None):
 	# if we're analyzing a thwomp field, just do photometry on the target, which should always be the brightest star (so first in the source df)
 	if is_thwomp:
 		sources = sources.head(1) 
-		
+
 		# overwrite the source df
 		source_path = f'/data/tierras/photometry/{date}/{target}/{ffname}/{date}_{target}_sources.csv'
 		sources.to_csv(source_path, index=0)
