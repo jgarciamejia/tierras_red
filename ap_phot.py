@@ -39,7 +39,8 @@ from scipy.optimize import curve_fit
 from scipy.interpolate import interp1d
 from copy import deepcopy
 import argparse
-import os 
+import functools
+import os
 import stat
 import time
 import astroalign as aa
@@ -219,7 +220,7 @@ def query_gaia_source(coord, width, height, rp_mag_limit):
 		pass
 	return res 
 
-def query_gaia_source_local(coord, wcs, im_shape, logger=None):
+def query_gaia_source_local(coord, wcs, im_shape, rp_mag_limit, logger=None):
 	gaia_path = '/data/tierras/gaia_dr3/gaia_source/'
 	hpx_level = 6
 
@@ -280,7 +281,7 @@ def query_gaia_source_local(coord, wcs, im_shape, logger=None):
 
 		tab = Table(hdul[1].data)
 
-		source_inds = np.where((tab['ra'] > ra_min) & (tab['ra'] < ra_max) & (tab['dec'] > dec_min) & (tab['dec'] < dec_max) & (tab['phot_rp_mean_mag'] <= 17))[0]
+		source_inds = np.where((tab['ra'] > ra_min) & (tab['ra'] < ra_max) & (tab['dec'] > dec_min) & (tab['dec'] < dec_max) & (tab['phot_rp_mean_mag'] <= rp_mag_limit))[0]
 		if len(source_inds) > 0:
 			sources.append(tab[source_inds])
 
@@ -357,7 +358,7 @@ def query_bailer_jones_local(wcs, im_shape):
 	return res2 
 
 
-def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01, rp_mag_limit=17):	
+def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01, rp_mag_limit=17, is_thwomp=False, targ_distance_cut=150):
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
 		INPUTS: 
@@ -478,7 +479,7 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 
 	# query gaia for sources
 	try: # try doing this locally first
-		res = query_gaia_source_local(coord, wcs, im_shape, logger=logger)
+		res = query_gaia_source_local(coord, wcs, im_shape, rp_mag_limit, logger=logger)
 	except: # if that fails, try querying the gaia archive
 		logger.debug(f'Local Gaia query failed! Trying web query.')
 		res = query_gaia_source(coord, width, height, rp_mag_limit)
@@ -528,30 +529,8 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 		except:
 			# sometimes it also breaks when you multiply by deg, resulting in deg^2 units??? I have no idea why that would happen.
 			gaia_coords = SkyCoord(ra=res['ra'], dec=res['dec'], pm_ra_cosdec=res['pmra'], pm_dec=res['pmdec'], obstime=Time('2016.0',format='decimalyear'))
-
-	# 20250131: removed 2MASS queries which were causing "OSError: [Errno 122] Disk Quota exceeded"...
-	# we don't really use 2MASS information so it's not necessary to include
-	# unclear to me why this error was occurring, though
-
-	# viz = Vizier(catalog="II/246",columns=['*','Date'], row_limit=-1)
-	# max_tries = 3
-	# try_n = 0 
-	# while try_n < max_tries:
-	# 	try:
-	# 		twomass_res = viz.query_region(coord, width=width, height=height)[0]
-	# 		break
-	# 	except:
-	# 		# sometimes the cache needs to be removed for this to work. 
-	# 		os.system('rm -rf ~/.astropy/cache/astroquery/Vizier')
-	# 		try_n += 1
 	
-	# twomass_coords = SkyCoord(twomass_res['RAJ2000'],twomass_res['DEJ2000'])
-	# twomass_epoch = Time('2000-01-01')
-	# gaia_coords_tm_epoch = gaia_coords.apply_space_motion(twomass_epoch)
 	gaia_coords_tierras_epoch = gaia_coords.apply_space_motion(tierras_epoch)
-
-	
-	# idx_gaia, sep2d_gaia, _ = gaia_coords_tm_epoch.match_to_catalog_sky(twomass_coords)
 
 	#Now set problem indices back to NaNs
 	res['pmra'][problem_inds] = np.nan
@@ -562,21 +541,11 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	tierras_pixel_coords = wcs.world_to_pixel(gaia_coords_tierras_epoch)
 
 	# # add 2MASS data and pixel positions to the source table
-	# try:
-	# 	# WHY does this sometimes get returned with a _ in front? 
-	# 	res.add_column(twomass_res['_2MASS'][idx_gaia],name='2MASS',index=1)
-	# except:
-	# 	res.add_column(twomass_res['2MASS'][idx_gaia],name='2MASS',index=1)
+	
 	res.add_column(tierras_pixel_coords[0],name='X pix', index=2)
 	res.add_column(tierras_pixel_coords[1],name='Y pix', index=3)
 	res.add_column(gaia_coords_tierras_epoch.ra, name='ra_tierras', index=4)
 	res.add_column(gaia_coords_tierras_epoch.dec, name='dec_tierras', index=5)
-	# res['Jmag'] = twomass_res['Jmag'][idx_gaia]
-	# res['e_Jmag'] = twomass_res['e_Jmag'][idx_gaia]
-	# res['Hmag'] = twomass_res['Hmag'][idx_gaia]
-	# res['e_Hmag'] = twomass_res['e_Hmag'][idx_gaia]
-	# res['Kmag'] = twomass_res['Kmag'][idx_gaia]
-	# res['e_Kmag'] = twomass_res['e_Kmag'][idx_gaia]
 
 	# check on the target and make sure it has a proper motion from Gaia 
 	hdr = fits.open(file_list[-1])[0].header
@@ -631,6 +600,17 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	bad_inds_half = np.where((res['Y pix'] >= 1019) & (res['Y pix'] <= 1032))[0]
 	res.remove_rows(bad_inds_half)
 	logger.debug(f'Removed {len(bad_inds_half)} sources that were too near the divide between the upper and lower detector halves.')
+
+	# for THWOMP (defocused) fields, the donut PSFs are large and overlapping, so cut any
+	# sources within targ_distance_cut pixels of the target to avoid contaminating it
+	if is_thwomp:
+		targ_ind = np.nanargmin(np.sqrt((res['X pix']-targ_x)**2 + (res['Y pix']-targ_y)**2))
+		targ_dists = np.sqrt((res['X pix']-res['X pix'][targ_ind])**2 + (res['Y pix']-res['Y pix'][targ_ind])**2)
+		near_inds = np.where((targ_dists <= targ_distance_cut) & (np.arange(len(res)) != targ_ind))[0]
+		res.remove_rows(near_inds)
+		logger.debug(f'Removed {len(near_inds)} sources within {targ_distance_cut} pixels of the target (THWOMP field).')
+
+		# breakpoint()
 
 	logger.info(f'Found {len(res)} sources!')
 
@@ -839,6 +819,114 @@ def circular_footprint(radius, dtype=int):
 	xx, yy = np.meshgrid(x, x)
 	return np.array((xx**2 + yy**2) <= radius**2, dtype=dtype)
 
+def _ring_model(coords, x0, y0, amp, bkg):
+	"""Azimuthally-symmetric radial-Gaussian ring (donut) model."""
+	x, y = coords
+	r = np.sqrt((x - x0)**2 + (y - y0)**2)
+	return amp * np.exp(-(r - 24)**2 / (2.0 * 10**2)) + bkg
+
+def centroid_donut_ring(data, mask=None, error=None, max_shift=40, win_scale=1.5):
+	"""Donut-aware centroid for defocused (THWOMP) sources, for use with
+	photutils' centroid_sources.
+
+	THWOMP images are intentionally defocused, so a star looks like a donut: a
+	bright ring with a faint center (the secondary-mirror obstruction shadow). A
+	2D-Gaussian centroid is the wrong model for this -- with any asymmetry it
+	slides onto the brightest arc of the ring or onto a neighbor. Instead this
+	fits an azimuthally-symmetric radial-Gaussian ring and returns the ring
+	*center*, i.e. the faint middle of the donut. Because the model is a ring of
+	radius r0, an isolated bright neighbor (a point, not a ring) fits poorly, so
+	the fit locks onto the donut rather than the neighbor. A distance-weight
+	window and position bounds act as additional backstops.
+
+	The ring radius r0 is estimated from the data (radius of peak azimuthally-
+	averaged flux), so it self-tunes to the defocus level.
+
+	Parameters
+	----------
+	data : 2D ndarray
+		Cutout around the expected source position (center pixel = expected position).
+	mask : 2D bool ndarray, optional
+		True where pixels should be ignored (e.g. above the non-linear threshold).
+	error : ignored
+		Accepted for compatibility with the centroid_sources interface.
+	max_shift : float
+		Maximum allowed centroid offset (pixels) from the cutout center. Backstop only.
+	win_scale : float
+		Weighting-window sigma as a multiple of the estimated ring radius. The window
+		keeps the full ring but suppresses flux farther out (e.g. a bright neighbor).
+
+	Returns
+	-------
+	(x, y) : floats
+		Centroid position in cutout coordinates.
+	"""
+	data = np.asarray(data, dtype=float)
+	if mask is not None:
+		data = np.where(mask, np.nan, data)
+	finite = np.isfinite(data)
+
+	yc = (data.shape[0] - 1) / 2.0
+	xc = (data.shape[1] - 1) / 2.0
+	if finite.sum() < 10:  # not enough pixels to fit; fall back to the expected position
+		print('not enough pixels to fit donut')
+		return xc, yc
+
+	yy, xx = np.mgrid[:data.shape[0], :data.shape[1]]
+	r = np.sqrt((xx - xc)**2 + (yy - yc)**2)
+
+	# --- data-driven ring radius: radius of peak azimuthally-averaged flux ---
+	bkg = np.nanmedian(data)
+	rint = r.astype(int)
+	rmax = int(min(data.shape) // 2 - 2)
+	rmin = 3
+	if rmax <= rmin:
+		return xc, yc
+	rflat = rint[finite]
+	dflat = data[finite] - bkg
+	sums = np.bincount(rflat, weights=dflat, minlength=rmax + 1)
+	counts = np.bincount(rflat, minlength=rmax + 1)
+	with np.errstate(invalid='ignore', divide='ignore'):
+		prof = sums / counts
+	prof = prof[rmin:rmax + 1]
+	if not np.any(np.isfinite(prof)):
+		print('prof not finite')
+		return xc, yc
+	r0_est = float(np.nanargmax(prof) + rmin)
+	amp_est = float(np.nanmax(prof))
+	if not np.isfinite(amp_est) or amp_est <= 0:
+		print('amp_est not finite')
+		return xc, yc
+	sigma_est = max(2.0, 0.2 * r0_est)
+	win_sigma = max(win_scale * r0_est, 6.0)
+
+
+	p0 = [xc, yc, amp_est, bkg]
+	lower = [xc - max_shift, yc - max_shift, 0.0, -np.inf]
+	upper = [xc + max_shift, yc + max_shift, np.inf, np.inf]
+
+	# fig, ax = plt.subplots(1,2,figsize=(10,6.5))
+	# ax[0].imshow(data, origin='lower', norm=simple_norm(data, min_percent=1, max_percent=99))
+	# ax[0].plot(xc, yc, 'bx')
+
+	try:
+		with warnings.catch_warnings():
+			warnings.simplefilter('ignore')
+			popt, _ = curve_fit(_ring_model, (xx[finite], yy[finite]), data[finite], p0=p0, bounds=(lower, upper), maxfev=500)
+	except (RuntimeError, ValueError):
+		print("ERROR FITTING DONUT")
+		breakpoint()
+		return xc, yc
+	
+	# ax[0].plot(popt[0], popt[1], 'rx')
+	# circ = plt.Circle((popt[0], popt[1]), radius=40, color='r', lw=2, fill=False)
+	# ax[0].add_artist(circ)
+
+	# ax[1].imshow(_ring_model((xx, yy), *popt), origin='lower')
+	# breakpoint()
+	# plt.close('all')
+	return popt[0], popt[1]
+
 def generate_square_cutout(image, position, size):
 	height, width = image.shape
 	
@@ -895,8 +983,15 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 		centroid_func = centroid_quadratic
 	else:
 		raise RuntimeError("centroid_type must be one of 'centroid_1dg', 'centroid_2dg', 'centroid_com', or 'centroid_quadratic'.")
-	
-	ffname = file_list[0].parent.name	
+
+	# THWOMP images are defocused donuts (bright ring, faint center) with significant
+	# PSF overlap: fit a ring model and return the ring center, so a faint source's
+	# centroid lands in the donut's faint middle instead of latching onto the bright
+	# ring or a nearby bright neighbor.
+	if is_thwomp:
+		centroid_func = functools.partial(centroid_donut_ring, max_shift=150, win_scale=3)
+
+	ffname = file_list[0].parent.name
 	target = file_list[0].parent.parent.name
 	date = file_list[0].parent.parent.parent.name 
 
@@ -1018,7 +1113,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 	# only data within a radius of x pixels around the expected source positions from WCS will be considered for centroiding
 		
 	if is_thwomp: # thwomp images are defocused so need larger cutouts for centroid measurements
-		centroid_footprint = circular_footprint(60)
+		centroid_footprint = circular_footprint(100)
 	else:
 		centroid_footprint = circular_footprint(5)
 
@@ -1187,10 +1282,8 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 
 		source_x[:,i], source_y[:,i] = source_wcs.world_to_pixel(SkyCoord(np.array(sources['ra_tierras'])*u.deg, np.array(sources['dec_tierras'])*u.deg))
 
-
-		# fig2, ax2 = plot_image(source_data)
-		# for j in range(len(source_x[:,i])):
-		# 	ax2.plot(source_x[j,i],source_y[j,i],'rx')
+		# fig, ax = plot_image(source_data)
+		# ax.plot(source_x[:,i], source_y[:,i], 'bx')
 
 		source_positions = [(source_x[j,i], source_y[j,i]) for j in range(n_sources)]
 
@@ -1214,7 +1307,7 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 				centroid_x, centroid_y = centroid_sources(cosmic_interpolated_data,source_x[:,i], source_y[:,i], centroid_func=centroid_func, footprint=centroid_footprint, mask=mask)	
 			# else, determine the centroid on un-interpolated data
 			else:
-				centroid_x, centroid_y = centroid_sources(source_data,source_x[:,i], source_y[:,i], centroid_func=centroid_func, footprint=centroid_footprint, mask=mask)	
+				centroid_x, centroid_y = centroid_sources(source_data, source_x[:,i], source_y[:,i], centroid_func=centroid_func, footprint=centroid_footprint, mask=mask)	
 			
 			# ax.scatter(centroid_x, centroid_y, marker='x', color='r')
 			# breakpoint()
@@ -1228,6 +1321,13 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 			# logger.debug(f'Source y (centroid): {[f"{item:.2f}" for item in source_y[:,i]]}')
 			
 			source_positions = [(source_x[j,i], source_y[j,i]) for j in range(n_sources)]
+
+			# ax.plot(centroid_x, centroid_y, 'rx')
+			# for kk in range(len(centroid_x)):
+			# 	circ = plt.Circle((centroid_x[kk], centroid_y[kk]), radius=40, color='r', lw=2, fill=False)
+			# 	ax.add_artist(circ)
+			# breakpoint()
+			# plt.close('all')
 	
 		logger.debug(f'Source position loop time: {time.time()-tcent:.2f} s')
 			
@@ -1313,118 +1413,6 @@ def circular_aperture_photometry(file_list, sources, ap_radii, logger, an_in=35,
 
 						breakpoint()
 			logger.debug(f'Cosmic interpolation time: {time.time()-tcosmic:.2f} s')
-
-		# if measure_fwhm: 
-		# 	tfwhm = time.time()
-		# 	k = 0 
-		# 	slice_size = 30
-		# 	# cutout_size = 30
-		# 	bkg = np.nanmedian(source_data)
-
-		# 	# TODO: this loop appears to slow down over time, WHY!?
-		# 	# this is, in general, the slowest loop of the program. How can we make it faster??
-		# 	for j in range(len(source_positions)):
-		# 		# try:
-		# 		# 	g_2d_cutout, cutout_pos = generate_square_cutout(source_data, source_positions[j], cutout_size)
-		# 		# except:
-		# 		# 	source_x_fwhm_arcsec[j,i] = np.nan
-		# 		# 	source_y_fwhm_arcsec[j,i] = np.nan
-		# 		# 	source_theta_radians[j,i] = np.nan 
-
-		# 		# cutout_shape = g_2d_cutout.shape
-
-		# 		# bkg = np.median(g_2d_cutout)
-		# 		# # bkg = np.mean(sigmaclip(g_2d_cutout,2,2)[0])
-
-		# 		# g_2d_cutout -= bkg 
-
-		# 		x_slice = source_data[int(source_y[j,i]),int(source_x[j,i]-int(slice_size/2)):int(source_x[j,i]+int(slice_size/2))]-bkg
-		# 		y_slice = source_data[int(source_y[j,i]-int(slice_size/2)):int(source_y[j,i]+int(slice_size/2)),int(source_x[j,i])]-bkg
-
-		# 		try:
-		# 			coeff, var_matrix = curve_fit(gauss, np.arange(slice_size), x_slice, p0=[np.nanmax(x_slice), slice_size/2, 3]) 
-		# 			source_x_fwhm_arcsec[j,i] = coeff[-1] * 2.35482 * PLATE_SCALE	
-		# 		except:
-		# 			source_x_fwhm_arcsec[j,i] = np.nan
-
-		# 		try:
-		# 			coeff, var_matrix = curve_fit(gauss, np.arange(slice_size), y_slice, p0=[np.nanmax(y_slice), slice_size/2, 3])
-		# 			source_y_fwhm_arcsec[j,i] = coeff[-1] * 2.35482 * PLATE_SCALE
-		# 		except:
-		# 			source_y_fwhm_arcsec[j,i] = np.nan
-				
-		# 	logger.debug(f'FWHM loop time: {time.time()-tfwhm:.2f} s')
-		# 	breakpoint()
-
-		# this method does 2D Gaussian fitting which is SLOOOOOOOW
-		# if measure_fwhm:						
-		# 	tfwhm = time.time()
-		# 	#Measure FWHM 
-		# 	k = 0
-		# 	cutout_size = 30
-		# 	g_init = models.Gaussian2D(amplitude=1,x_mean=cutout_size/2,y_mean=cutout_size/2, x_stddev=3, y_stddev=3)
-		# 	g_init.theta.bounds = (0, np.pi)
-		# 	g_init.x_stddev.bounds = (1,10)
-		# 	g_init.y_stddev.bounds = (1,10)
-
-		# 	# pre-compute meshgrid of pixel indices for square cutouts (which will be the case for all sources except those near the edges)
-		# 	xx2, yy2 = np.meshgrid(np.arange(cutout_size),np.arange(cutout_size))
-
-		# 	# TODO: this loop appears to slow down over time, WHY!?
-		# 	# this is, in general, the slowest loop of the program. How can we make it faster??
-		# 	for j in range(len(source_positions)):
-		# 		try:
-		# 			g_2d_cutout, cutout_pos = generate_square_cutout(source_data, source_positions[j], cutout_size)
-		# 		except:
-		# 			source_x_fwhm_arcsec[j,i] = np.nan
-		# 			source_y_fwhm_arcsec[j,i] = np.nan
-		# 			source_theta_radians[j,i] = np.nan 
-
-		# 		cutout_shape = g_2d_cutout.shape
-
-		# 		bkg = np.median(g_2d_cutout)
-		# 		# bkg = np.mean(sigmaclip(g_2d_cutout,2,2)[0])
-
-		# 		g_2d_cutout -= bkg 
-				
-		# 		# recompute the meshgrid only if you get a non-square cutout
-		# 		if g_2d_cutout.shape != (cutout_size, cutout_size):
-		# 			xx3, yy3 = np.meshgrid(np.arange(cutout_shape[1]),np.arange(cutout_shape[0]))
-		# 			xx = xx3
-		# 			yy = yy3
-		# 		else:
-		# 			xx = xx2
-		# 			yy = yy2 
-				
-		# 		# intialize the model 
-		# 		g_init.amplitude = g_2d_cutout[int(cutout_pos[1]), int(cutout_pos[0])]
-
-		# 		# use the cutout position returned from generate_square_cutout to predict its location
-		# 		g_init.x_mean = cutout_pos[0]
-		# 		g_init.y_mean = cutout_pos[1]
-
-
-		# 		g = fit_g(g_init,xx,yy,g_2d_cutout)
-				
-		# 		if g.y_stddev.value > g.x_stddev.value:
-		# 			x_stddev_save = g.x_stddev.value
-		# 			y_stddev_save = g.y_stddev.value
-		# 			g.x_stddev = y_stddev_save
-		# 			g.y_stddev = x_stddev_save
-		# 			g.theta += np.pi/2
-
-		# 		source_x_fwhm_arcsec[j,i] = g.x_stddev.value * 2.35482 * PLATE_SCALE
-		# 		source_y_fwhm_arcsec[j,i] = g.y_stddev.value * 2.35482 * PLATE_SCALE
-		# 		source_theta_radians[j,i] = g.theta.value
-		# 		#print(time.time()-t1)
-
-		# 		# fig, ax = plt.subplots(1,2,figsize=(12,8),sharex=True,sharey=True)
-		# 		# norm = ImageNormalize(g_2d_cutout-bkg,interval=ZScaleInterval())
-		# 		# ax[0].imshow(g_2d_cutout-bkg,origin='lower',interpolation='none',norm=norm)
-		# 		# ax[1].imshow(g(xx2,yy2),origin='lower',interpolation='none',norm=norm)
-		# 		# plt.tight_layout()
-		# 	logger.debug(f'FWHM loop time: {time.time()-tfwhm:.2f} s')
-		# 	breakpoint()	
 
 	# write out the ancillary data as a parquet file
 	output_path = Path('/data/tierras/photometry/'+date+'/'+target+'/'+ffname+f'/{date}_{target}_ancillary_data.parquet')
@@ -2809,8 +2797,11 @@ def main(raw_args=None):
 
 	median_ra, median_dec = get_median_field_pointing(target)
 
+	if is_thwomp: # for thwomp targets, can only do meaningful photometry out to G_rp = 12ish 
+		rp_mag_limit = 11
+
 	# identify sources in the field 
-	sources = source_selection(flattened_files, logger, ra=median_ra, dec=median_dec, edge_limit=edge_limit, plot=plot_source_detection, overwrite=True, rp_mag_limit=rp_mag_limit)
+	sources = source_selection(flattened_files, logger, ra=median_ra, dec=median_dec, edge_limit=edge_limit, plot=plot_source_detection, overwrite=True, rp_mag_limit=rp_mag_limit, is_thwomp=is_thwomp)
 
 	if sources is None or len(sources) == 0:
 		logger.info('No sources found, returning.')		
@@ -2825,15 +2816,6 @@ def main(raw_args=None):
 	
 	# measure fwhm on grid of stars spread across the images
 	measure_fwhm_grid(date, target, ffname, sources)
-
-	# if we're analyzing a thwomp field, just do photometry on the target, which should always be the brightest star (so first in the source df)
-	if is_thwomp:
-		sources = sources.head(1) 
-
-		# overwrite the source df
-		source_path = f'/data/tierras/photometry/{date}/{target}/{ffname}/{date}_{target}_sources.csv'
-		sources.to_csv(source_path, index=0)
-		set_tierras_permissions(source_path)
 
 	# do photometry 
 	circular_aperture_photometry(flattened_files, sources, ap_radii, logger, an_in=an_in, an_out=an_out, phot_type=phot_type, centroid=centroid, centroid_type=centroid_type, interpolate_cosmics=False, is_thwomp=is_thwomp)

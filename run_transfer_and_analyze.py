@@ -14,10 +14,10 @@ import numpy as np
 
 logfile = '/data/tierras/log/pipeline.log'
 logging.basicConfig(filename=logfile, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-emails = ['patrick.tamburo@cfa.harvard.edu', 'juliana.garcia-mejia@cfa.harvard.edu']
+emails = ['patrick.tamburo@cfa.harvard.edu', 'juliana.garcia-mejia@cfa.harvard.edu', 'adam.distler@cfa.harvard.edu']
 
 def notify_failure(subject): 
-    # email Pat / Juliana if the pipeline breaks
+    # email Pat / Juliana / Adam if the pipeline breaks
     recipients = " ".join(emails)
     safe_subject = shlex.quote(subject)  # adds quotes and escapes special chars
     try: 
