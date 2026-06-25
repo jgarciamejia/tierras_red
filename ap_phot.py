@@ -47,7 +47,7 @@ import astroalign as aa
 #import reproject as rp
 import sep 
 from fitsutil import *
-from pathlib import Path
+from pathlib import Path, PosixPath
 from sklearn import linear_model
 import copy
 import batman
@@ -358,7 +358,7 @@ def query_bailer_jones_local(wcs, im_shape):
 	return res2 
 
 
-def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01, rp_mag_limit=17, is_thwomp=False, targ_distance_cut=150):
+def source_selection(file_list, logger=None, ra=None, dec=None, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01, rp_mag_limit=17, is_thwomp=False, targ_distance_cut=150):
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
 		INPUTS: 
@@ -386,13 +386,18 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	if len(file_list) == 0:
 		return None
 
+	# if file_list is list of strings, convert to pathlib objects
+	if type(file_list[0]) is str:
+		file_list = [Path(i) for i in file_list]
+
 	date = file_list[0].parent.parent.parent.name 
 	target = file_list[0].parent.parent.name 
 	ffname = file_list[0].parent.name 
 	source_path = f'/data/tierras/photometry/{date}/{target}/{ffname}/{date}_{target}_sources.csv'
 
 	if os.path.exists(source_path) and not overwrite:
-		logger.info(f'Restoring existing sources from {source_path}.')
+		if logger is not None:
+			logger.info(f'Restoring existing sources from {source_path}.')
 		source_df = pd.read_csv(source_path)
 		return source_df
 
@@ -443,16 +448,19 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 
 	# some nights are full of only bad guiding images; skip them by returning None here
 	if len(file_list) == bad_ag_files:
-		logging.info('No exposures with successful acquisition! Returning.')
+		if logger is not None:
+			logging.info('No exposures with successful acquisition! Returning.')
 		return None
 	
 	# identify the image closest to the average position; if it's off by more than 100 pix from the average pointing, skip
 	im_distances = np.sqrt((avg_central_ra-np.array(central_ras))**2 + (avg_central_dec-np.array(central_decs))**2)
 	if min(im_distances*60*60/plate_scale) > 100:
-		logger.info(f'Image closest to field center is off by more than 100 pixels, returning.')
+		if logger is not None:
+			logger.info(f'Image closest to field center is off by more than 100 pixels, returning.')
 		return None
 
-	logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
+	if logger is not None:
+		logger.debug(f'Average central RA/Dec: {avg_central_ra:.6f}, {avg_central_dec:.6f}')	
 
 	central_im_file = ag_files[np.argmin(im_distances)]
 
@@ -467,21 +475,25 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	# get the epoch of these observations 
 	tierras_epoch = Time(header['TELDATE'],format='decimalyear')
 
-	logger.debug(f'Epoch of Tierras observations: {tierras_epoch.value:.6f}')
+	if logger is not None:
+		logger.debug(f'Epoch of Tierras observations: {tierras_epoch.value:.6f}')
+
 	# set up the region on sky that we'll query in Gaia
 	# to be safe, set the width/height to be a bit larger than the estimates from plate scale alone, and cut to sources that actually fall on the chip after the query is complete
 	#	after the query is complete
 
 	coord = SkyCoord(avg_central_ra*u.deg, avg_central_dec*u.deg)
 	width = u.Quantity(plate_scale*im_shape[0],u.arcsec)/np.cos(np.radians(avg_central_dec))
-	height = u.Quantity(plate_scale*im_shape[1],u.arcsec)	
-	logger.debug(f'Using a Gaia RP mag limit of {rp_mag_limit:.1f}.')
+	height = u.Quantity(plate_scale*im_shape[1],u.arcsec)
+	if logger is not None:	
+		logger.debug(f'Using a Gaia RP mag limit of {rp_mag_limit:.1f}.')
 
 	# query gaia for sources
 	try: # try doing this locally first
 		res = query_gaia_source_local(coord, wcs, im_shape, rp_mag_limit, logger=logger)
 	except: # if that fails, try querying the gaia archive
-		logger.debug(f'Local Gaia query failed! Trying web query.')
+		if logger is not None:
+			logger.debug(f'Local Gaia query failed! Trying web query.')
 		res = query_gaia_source(coord, width, height, rp_mag_limit)
 	
 	# Do a separate search for objects in the Bailer-Jones 'photogeo' catalog
@@ -553,7 +565,8 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	targ_y = hdr['CAT-Y']
 	closest_source = np.nanargmin(np.sqrt((res['X pix']-targ_x)**2 + (res['Y pix']-targ_y)**2))
 	if np.isnan(res['pmra'][closest_source]) or np.isnan(res['pmdec'][closest_source]):
-		logger.info('WARNING: The closest source to the CAT-X/Y position lacks proper motion measurements in Gaia DR3. Attempting to find them on Simbad.')
+		if logger is not None:
+			logger.info('WARNING: The closest source to the CAT-X/Y position lacks proper motion measurements in Gaia DR3. Attempting to find them on Simbad.')
 		simbad = Simbad()
 		simbad.add_votable_fields("mespm", "otype")
 		try:
@@ -568,7 +581,8 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 			res['ra_tierras'][closest_source] = gaia_coord_tierras_epoch.ra.value
 			res['dec_tierras'][closest_source] = gaia_coord_tierras_epoch.dec.value
 		except:
-			logger.info('ERROR: Simbad query failed. Expected source coordinates in Tierras data may be innacurate.')
+			if logger is not None:
+				logger.info('ERROR: Simbad query failed. Expected source coordinates in Tierras data may be innacurate.')
 
 	# determine which chip the sources fall on 
 	# 0 = bottom, 1 = top 
@@ -581,25 +595,30 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	res = res[use_inds]
 	res_full = copy.deepcopy(res)	
 
-	logger.debug(f'Found {len(res)} sources in Gaia query.')
+	if logger is not None:
+		logger.debug(f'Found {len(res)} sources in Gaia query.')
 
 	#Cut to sources that are away from the edges
 	use_inds = np.where((res['Y pix'] > edge_limit) & (res['Y pix']<im_shape[0]-edge_limit-1) & (res['X pix'] > edge_limit) & (res['X pix'] < im_shape[1]-edge_limit-1))[0]
-	logger.debug(f'Removed {len(res)-len(use_inds)} sources that are within {edge_limit} pixels of the detector edges.')
+	if logger is not None:
+		logger.debug(f'Removed {len(res)-len(use_inds)} sources that are within {edge_limit} pixels of the detector edges.')
 	res = res[use_inds]
 	
 	# remove ref stars that are too close to the bad columns or the divide between the detector halves
 	bad_inds_col_1 = np.where((res['X pix'] >= 1431) & (res['X pix'] <= 1472) & (res['Y pix'] <= 1032))[0]
 	res.remove_rows(bad_inds_col_1)
-	logger.debug(f'Removed {len(bad_inds_col_1)} sources that were too near the bad pixel column in the lower detector half.')
+	if logger is not None:
+		logger.debug(f'Removed {len(bad_inds_col_1)} sources that were too near the bad pixel column in the lower detector half.')
 
 	bad_inds_col_2 = np.where((res['X pix'] >= 1771) & (res['X pix'] <= 1813) & (res['Y pix'] >= 1023))[0]
 	res.remove_rows(bad_inds_col_2)
-	logger.debug(f'Removed {len(bad_inds_col_2)} sources that were too near the bad pixel column in the upper detector half.')
+	if logger is not None:
+		logger.debug(f'Removed {len(bad_inds_col_2)} sources that were too near the bad pixel column in the upper detector half.')
 
 	bad_inds_half = np.where((res['Y pix'] >= 1019) & (res['Y pix'] <= 1032))[0]
 	res.remove_rows(bad_inds_half)
-	logger.debug(f'Removed {len(bad_inds_half)} sources that were too near the divide between the upper and lower detector halves.')
+	if logger is not None:
+		logger.debug(f'Removed {len(bad_inds_half)} sources that were too near the divide between the upper and lower detector halves.')
 
 	# for THWOMP (defocused) fields, the donut PSFs are large and overlapping, so cut any
 	# sources within targ_distance_cut pixels of the target to avoid contaminating it
@@ -608,11 +627,13 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 		targ_dists = np.sqrt((res['X pix']-res['X pix'][targ_ind])**2 + (res['Y pix']-res['Y pix'][targ_ind])**2)
 		near_inds = np.where((targ_dists <= targ_distance_cut) & (np.arange(len(res)) != targ_ind))[0]
 		res.remove_rows(near_inds)
-		logger.debug(f'Removed {len(near_inds)} sources within {targ_distance_cut} pixels of the target (THWOMP field).')
+		if logger is not None:
+			logger.debug(f'Removed {len(near_inds)} sources within {targ_distance_cut} pixels of the target (THWOMP field).')
 
 		# breakpoint()
 
-	logger.info(f'Found {len(res)} sources!')
+	if logger is not None:
+		logger.info(f'Found {len(res)} sources!')
 
 	if plot:
 		ax.plot(res['X pix'], res['Y pix'], marker='x', ls='', color='tab:red')
@@ -633,7 +654,8 @@ def source_selection(file_list, logger, ra=None, dec=None, min_snr=10, edge_limi
 	output_df.to_csv(source_path, index=0)
 	set_tierras_permissions(source_path)
 
-	logger.debug(f'Saved source csv to {source_path}')
+	if logger is not None:
+		logger.debug(f'Saved source csv to {source_path}')
 	return output_df
 
 def load_bad_pixel_mask():
@@ -2797,7 +2819,7 @@ def main(raw_args=None):
 
 	median_ra, median_dec = get_median_field_pointing(target)
 
-	if is_thwomp: # for thwomp targets, can only do meaningful photometry out to G_rp = 12ish 
+	if is_thwomp: # for thwomp targets, can only do meaningful photometry out to G_rp = 11ish 
 		rp_mag_limit = 11
 
 	# identify sources in the field 
