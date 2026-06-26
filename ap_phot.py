@@ -937,7 +937,6 @@ def centroid_donut_ring(data, mask=None, error=None, max_shift=40, win_scale=1.5
 			popt, _ = curve_fit(_ring_model, (xx[finite], yy[finite]), data[finite], p0=p0, bounds=(lower, upper), maxfev=500)
 	except (RuntimeError, ValueError):
 		print("ERROR FITTING DONUT")
-		breakpoint()
 		return xc, yc
 	
 	# ax[0].plot(popt[0], popt[1], 'rx')
