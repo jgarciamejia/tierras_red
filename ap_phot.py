@@ -571,9 +571,16 @@ def source_selection(file_list, logger=None, ra=None, dec=None, min_snr=10, edge
 		simbad.add_votable_fields("mespm", "otype")
 		try:
 			simbad_res = simbad.query_object(f'Gaia DR3 {res["source_id"][closest_source]}')
-			res['pmra'][closest_source] = simbad_res['PM_pmra'][0]
-			res['pmdec'][closest_source] = simbad_res['PM_pmde'][0]
+			try:
+				res['pmra'][closest_source] = simbad_res['PM_pmra'][0]
+				res['pmdec'][closest_source] = simbad_res['PM_pmde'][0]
+			except:
+				# sometimes the table gets returned with different keywords for proper motions...
+				res['pmra'][closest_source] = simbad_res['mespm.pmra'][0]
+				res['pmdec'][closest_source] = simbad_res['mespm.pmde'][0]
+
 			gaia_coord = SkyCoord(ra=res['ra'][closest_source]*u.deg, dec=res['dec'][closest_source]*u.deg, pm_ra_cosdec=res['pmra'][closest_source]*u.mas/u.yr, pm_dec=res['pmdec'][closest_source]*u.mas/u.yr, obstime=Time('2016',format='decimalyear'))
+			
 			gaia_coord_tierras_epoch = gaia_coord.apply_space_motion(tierras_epoch)
 			tierras_pixel_coord = wcs.world_to_pixel(gaia_coord_tierras_epoch)
 			res['X pix'][closest_source] = tierras_pixel_coord[0]
