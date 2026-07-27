@@ -10,13 +10,21 @@ from astropy.nddata import NDData
 from astropy.table import Table
 from astropy.time import Time
 from astropy.visualization import simple_norm 
+from astropy.modeling import fitting
+from astropy.nddata import NDData, Cutout2D
 
 from photutils.background import Background2D
+from photutils.aperture import CircularAperture, aperture_photometry
 from photutils.psf import (
     EPSFBuilder,
     extract_stars,
+    EPSFFitter,
+    PSFPhotometry
 )
 
+from scipy.interpolate import RectBivariateSpline
+from scipy.optimize import least_squares, curve_fit
+from scipy.stats import sigmaclip
 from ap_phot import plot_image, source_selection
 
 def build_epsf(image_sub, stars_tbl, r_outer,
@@ -153,351 +161,101 @@ def load_epsf_fits(filepath):
           f"oversampling={oversampling}  ← {filepath}")
     return epsf
 
-def gaia_rp_to_counts(g_rp, exptime, coeff=9.7e8, gain=5.9):
+def make_cutout(image, xi, yi, half):
+        """
+        Cut out a (2*half x 2*half) region centred on (xi, yi),
+        clipping at image edges.
+
+        Returns
+        -------
+        cutout  : 2D array  — the clipped pixel data
+        x_c     : float     — star x position inside the cutout
+        y_c     : float     — star y position inside the cutout
+        """
+        ny, nx = image.shape
+
+        # Desired bounds
+        x0 = int(xi) - half;  x1 = int(xi) + half
+        y0 = int(yi) - half;  y1 = int(yi) + half
+
+        # Clip to image
+        x0c = max(x0, 0);  x1c = min(x1, nx)
+        y0c = max(y0, 0);  y1c = min(y1, ny)
+
+        cutout = image[y0c:y1c, x0c:x1c]
+
+        # Star centre in cutout coordinates
+        x_c = float(xi) - x0c
+        y_c = float(yi) - y0c
+
+        return cutout, x_c, y_c
+
+def epsf_interp(epsf):
+    # first diagnose the normalization of the ePSF
+    psf_data = epsf.data.copy()
+    os       = float(np.atleast_1d(epsf.oversampling)[0])
+    ny_os, nx_os = psf_data.shape
+
+    x_ax = (np.arange(nx_os) - (nx_os - 1) / 2.0) / os
+    y_ax = (np.arange(ny_os) - (ny_os - 1) / 2.0) / os
+    interp_raw = RectBivariateSpline(y_ax, x_ax, psf_data, kx=3, ky=3)
+
+    # Evaluate on a native pixel grid large enough to capture all flux
+    half_eval = int(max(nx_os, ny_os) / (2 * os)) + 10
+    yy_e, xx_e = np.mgrid[-half_eval:half_eval+1,
+                        -half_eval:half_eval+1].astype(float)
+    psf_native = interp_raw(yy_e.ravel(), xx_e.ravel(),
+                            grid=False).reshape(yy_e.shape)
+    
+    # now renormalize
+    norm_factor = psf_native.sum()
+    psf_data_norm = psf_data / norm_factor
+
+    interp = RectBivariateSpline(y_ax, x_ax, psf_data_norm, kx=3, ky=3)
+    return interp
+
+def fit_epsf(data, epsf_interp):
     """
-    Convert Gaia RP magnitudes to expected total counts in an exposure.
-
-    counts = t_exp × 10^( (ZP - G_RP) / 2.5 )
-
-    Parameters
-    ----------
-    g_rp    : array-like — Gaia RP magnitudes
-    exptime : float      — exposure time [s]
-    coeff   : float      — the calibrating flux value for G_RP = 0 from instrument patper [e- / s]
-    gain    : floag      — the gain of the image (e- / count)
-    Returns
-    -------
-    counts : ndarray — expected total counts per star
+        fit epsf to Tierras data 
     """
-    return exptime * coeff * 10.0**((- np.asarray(g_rp, dtype=float)) / 2.5) / gain
+    yy, xx = np.mgrid[0:data.shape[0], 0:data.shape[1]].astype(float)
 
-def render_psf_model(
-    epsf,
-    x_positions,
-    y_positions,
-    fluxes,
-    image_shape = (2048, 4096),
-    psf_half_size = 150,   # [px] half-width of rendering box; auto-detected if None
-):
+    def residuals(p):
+        xc, yc, flux = p
+        model = flux * epsf_interp((yy - yc).ravel(),
+                            (xx - xc).ravel(), grid=False).reshape(cutout.shape)
+        return (cutout - model).ravel()
+    
+    res = least_squares(residuals, x0=[x_c0, y_c0, float(data.sum())], method='lm')
+
+    return res
+
+
+def flux_model(x, A):
     """
-    Render each star as a scaled ePSF stamp and accumulate into a model image.
-
-    For defocused images the PSF is large; psf_half_size must exceed r_outer.
-    Edge stars are rendered partially and flagged.
-
-    Parameters
-    ----------
-    epsf          : EPSFModel — normalised photutils ePSF  (sum ≈ 1 per unit flux)
-    x_positions   : array     — star x pixel centres  (0-indexed)
-    y_positions   : array     — star y pixel centres
-    fluxes        : array     — total counts per star  [same units as image]
-    image_shape   : tuple     — (nrows, ncols)
-    psf_half_size : int|None  — half-size of stamp used for evaluation [px]
-
-    Returns
-    -------
-    model     : 2D ndarray  — model image
-    info_table: Table       — per-star: flux_input, pixel_sum, flux_fraction, status
+        fittable model of flux (e-/s) as a function of magnitude
     """
-    nrows, ncols = image_shape
-    model = np.zeros(image_shape, dtype=np.float64)
+    return A*10**(-x/2.5)
 
-    # ── Auto-detect minimum safe stamp size ─────────────────────────────────
-    if psf_half_size is None:
-        os          = np.atleast_1d(np.asarray(epsf.oversampling, dtype=float))
-        native_size = np.asarray(epsf.data.shape) / os
-        psf_half_size = int(np.ceil(max(native_size) / 2)) + 5
+def generate_defocused_psf(x0, y0, rp_mag, shape, epsf_interp, gain=5.9, exptime=1):
+    yy, xx = np.mgrid[0:shape[0], 0:shape[1]].astype(float)
 
-    x_arr = np.asarray(x_positions, dtype=float)
-    y_arr = np.asarray(y_positions, dtype=float)
-    f_arr = np.asarray(fluxes,      dtype=float)
+    A = 1.21437174e+09 # e-/s, determined from fit of defocused sources in HIP107350 field on 20260621
+    flux = flux_model(rp_mag, A)
+    
+    model = flux * epsf_interp((yy - y0).ravel(),
+                (xx - x0).ravel(),
+                grid=False).reshape(shape) * exptime / gain # model in units of ADU
+    
+    return model
 
-    statuses, psums, ffracs = [], [], []
-
-    for xc, yc, flux in zip(x_arr, y_arr, f_arr):
-        # ── Skip bad / zero-flux entries ────────────────────────────────────
-        if flux <= 0 or not np.isfinite(flux):
-            statuses.append('skipped'); psums.append(0.0); ffracs.append(0.0)
-            continue
-
-        # ── Pixel-aligned bounding box clipped to image ──────────────────────
-        xi = int(round(xc));  yi = int(round(yc))
-        x0 = max(0,     xi - psf_half_size)
-        x1 = min(ncols, xi + psf_half_size + 1)
-        y0 = max(0,     yi - psf_half_size)
-        y1 = min(nrows, yi + psf_half_size + 1)
-
-        if x0 >= x1 or y0 >= y1:
-            statuses.append('outside'); psums.append(0.0); ffracs.append(0.0)
-            continue
-
-        # ── Evaluate ePSF on pixel grid ──────────────────────────────────────
-        yy, xx = np.mgrid[y0-y0:y1-y0, x0-x0:x1-x0].astype(float)
-        stamp  = epsf.evaluate(x=xx, y=yy, flux=flux, x_0=psf_half_size/2 + epsf.shape[0]/2 - 8 , y_0=psf_half_size/2 + epsf.shape[1]/2 - 9)
-        model[y0:y1, x0:x1] += stamp
-
-        psum   = float(stamp.sum())
-        ffrac  = psum / flux
-        status = 'edge' if (
-            xi < psf_half_size or xi > ncols - psf_half_size or
-            yi < psf_half_size or yi > nrows - psf_half_size
-        ) else 'ok'
-
-        statuses.append(status)
-        psums.append(psum)
-        ffracs.append(ffrac)
-
-        # breakpoint()
-
-    info_table = Table({
-        'x'            : x_arr,
-        'y'            : y_arr,
-        'flux_input'   : f_arr,
-        'pixel_sum'    : psums,
-        'flux_fraction': ffracs,   # ≈ 1.0 for interior stars; < 1.0 at edges
-        'status'       : statuses,
-    })
-
-    counts = {s: statuses.count(s) for s in ['ok', 'edge', 'outside', 'skipped']}
-    print(f"Rendered: {counts['ok']} ok | {counts['edge']} edge | "
-          f"{counts['outside']} outside | {counts['skipped']} skipped")
-
-    return model, info_table
-
-def extract_cutout_grid(image, xc, yc, half_size):
-    """
-    Extract a square cutout centred on (xc, yc) and return its
-    absolute pixel coordinate arrays — needed so PSF evaluation
-    uses the same coordinate system as the model.
-
-    Returns
-    -------
-    cutout : 2D array
-    xx     : 2D array of absolute x pixel centres
-    yy     : 2D array of absolute y pixel centres
-    slices : (y_slice, x_slice) used to index back into the image
-    """
-    nrows, ncols = image.shape
-    xi, yi = int(round(xc)), int(round(yc))
-
-    x0 = max(0,     xi - half_size);  x1 = min(ncols, xi + half_size + 1)
-    y0 = max(0,     yi - half_size);  y1 = min(nrows, yi + half_size + 1)
-
-    cutout = image[y0:y1, x0:x1].copy()
-    yy, xx = np.mgrid[y0:y1, x0:x1].astype(float)
-    #         ↑ absolute coords         ↑ absolute coords
-    return cutout, xx, yy, (slice(y0, y1), slice(x0, x1))
-
-def compute_psf_moments(cutout, xx, yy, xc, yc, sky=0.0):
-    """
-    Compute quadrupole moments, size, and ellipticity of a PSF stamp.
-    These should be ~constant if the PSF is truly uniform.
-
-    R² = Mxx + Myy  — isotropic size [px²]
-    e1 = (Mxx - Myy) / R²  — elongation along x vs y  (ideal: 0)
-    e2 = 2 Mxy / R²        — elongation at 45°         (ideal: 0)
-    """
-    d = np.maximum(cutout - sky, 0.0)
-    total = d.sum()
-    if total <= 0:
-        nan = np.nan
-        return dict(R2=nan, e1=nan, e2=nan, Mxx=nan, Myy=nan, Mxy=nan,
-                    x_centroid=nan, y_centroid=nan, concentration=nan)
-
-    d_n  = d / total
-    dx   = xx - xc
-    dy   = yy - yc
-
-    # First moments (centroid residual — should be ~0 if position is right)
-    x_cen = float(np.sum(d_n * dx))
-    y_cen = float(np.sum(d_n * dy))
-
-    # Second moments
-    Mxx = float(np.sum(d_n * dx**2))
-    Myy = float(np.sum(d_n * dy**2))
-    Mxy = float(np.sum(d_n * dx * dy))
-    R2  = Mxx + Myy
-    e1  = (Mxx - Myy) / R2 if R2 > 0 else np.nan
-    e2  = 2.0 * Mxy  / R2 if R2 > 0 else np.nan
-
-    # Concentration: flux fraction inside inner vs outer ring
-    r         = np.sqrt(dx**2 + dy**2)
-    r_scale   = np.sqrt(R2) if R2 > 0 else 1.0
-    flux_core = d[r <= 0.5 * r_scale].sum()
-    flux_wing = d[(r > 0.5 * r_scale) & (r <= 1.5 * r_scale)].sum()
-    conc      = flux_core / (flux_wing + 1e-30)
-
-    return dict(R2=R2, e1=e1, e2=e2,
-                Mxx=Mxx, Myy=Myy, Mxy=Mxy,
-                x_centroid=x_cen, y_centroid=y_cen,
-                concentration=conc)
-
-def diagnose_psf_variation(image, stars_tbl, half_size,
-                            saturation=None, sky=0.0,
-                            mag_col='phot_rp_mean_mag'):
-    """
-    Measure PSF shape metrics for every star and return a diagnostic table.
-    Use plot_psf_variation() to visualise the results.
-    """
-    rows = []
-    for row in stars_tbl:
-        xc = float(row['x_pix'] if 'x_pix' in row.colnames else row['x'])
-        yc = float(row['y_pix'] if 'y_pix' in row.colnames else row['y'])
-        cutout, xx, yy, _ = extract_cutout_grid(image, xc, yc, half_size)
-
-        is_sat = (saturation is not None) and bool(np.any(cutout >= saturation))
-        m = compute_psf_moments(cutout, xx, yy, xc, yc, sky=sky)
-
-        entry = {'x': xc, 'y': yc,
-                 'peak': float(cutout.max()),
-                 'total_flux': float(cutout.sum()),
-                 'saturated': is_sat, **m}
-        if mag_col in stars_tbl.colnames:
-            entry['mag'] = float(row[mag_col])
-        rows.append(entry)
-
-    return Table(rows)
-
-def plot_psf_variation(diag_tbl, image_shape=None, figsize=(16, 10)):
-    """
-    Six-panel diagnostic plot:
-      Top row    — shape metrics vs magnitude (brightness dependence)
-      Bottom row — shape metric maps across the detector (position dependence)
-    """
-    ok  = ~np.asarray(diag_tbl['saturated'], dtype=bool)
-    has_mag = 'mag' in diag_tbl.colnames
-
-    fig = plt.figure(figsize=figsize)
-    gs  = gridspec.GridSpec(2, 3, hspace=0.45, wspace=0.35)
-
-    x_data  = diag_tbl['mag'][ok]    if has_mag else diag_tbl['total_flux'][ok]
-    x_label = 'G_RP [mag]'           if has_mag else 'Total flux [counts]'
-
-    metrics = [
-        ('R2',          r'$R^2 = M_{xx} + M_{yy}$ [px²]', 'Isotropic size'),
-        ('e1',          r'Ellipticity $e_1$',               'x vs y elongation'),
-        ('concentration', 'Concentration index',            'Core-to-ring ratio'),
-    ]
-
-    # ── Top row: metric vs magnitude ─────────────────────────────────────────
-    for col, (key, ylabel, title) in enumerate(metrics):
-        ax  = fig.add_subplot(gs[0, col])
-        val = np.asarray(diag_tbl[key][ok], dtype=float)
-        med = np.nanmedian(val)
-        std = np.nanstd(val)
-
-        ax.scatter(x_data, val, s=12, alpha=0.6, c='steelblue', zorder=3)
-        ax.axhline(med, color='crimson', lw=1.2, ls='--',
-                   label=f'median = {med:.3f}')
-        ax.fill_between([x_data.min(), x_data.max()],
-                        med - std, med + std,
-                        color='crimson', alpha=0.1, label=f'±1σ = {std:.3f}')
-
-        # Mark saturated stars
-        if np.any(~ok):
-            ax.scatter(
-                diag_tbl['mag'][~ok] if has_mag else diag_tbl['total_flux'][~ok],
-                np.full((~ok).sum(), med),
-                marker='x', c='orange', s=30, zorder=4, label='saturated'
-            )
-        ax.set_xlabel(x_label, fontsize=9)
-        ax.set_ylabel(ylabel,  fontsize=9)
-        ax.set_title(f'{title}\nvs magnitude', fontsize=9)
-        ax.legend(fontsize=7)
-
-    # ── Bottom row: 2D spatial maps ───────────────────────────────────────────
-    for col, (key, ylabel, title) in enumerate(metrics):
-        ax  = fig.add_subplot(gs[1, col])
-        val = np.asarray(diag_tbl[key][ok], dtype=float)
-        vmed = np.nanmedian(val)
-        vrange = max(np.nanpercentile(np.abs(val - vmed), 95), 1e-6)
-
-        sc = ax.scatter(
-            diag_tbl['x'][ok], diag_tbl['y'][ok],
-            c=val, s=35,
-            cmap='RdBu_r',
-            norm=Normalize(vmin=vmed - vrange, vmax=vmed + vrange),
-            zorder=3,
-        )
-        plt.colorbar(sc, ax=ax, label=ylabel, fraction=0.04, pad=0.03)
-
-        if image_shape is not None:
-            ax.set_xlim(0, image_shape[1])
-            ax.set_ylim(0, image_shape[0])
-        ax.set_xlabel('x [px]', fontsize=9)
-        ax.set_ylabel('y [px]', fontsize=9)
-        ax.set_title(f'{title}\nacross detector', fontsize=9)
-
-    fig.suptitle('PSF Shape Variation Diagnostics', y=1.01, fontsize=12)
-    plt.show()
-
-
-def plot_radial_profile_comparison(image, stars_tbl, epsf, half_size,
-                                    n_bins=30, mag_col='phot_rp_mean_mag',
-                                    n_mag_bins=3):
-    """
-    Compare azimuthally-averaged radial profiles in bins of magnitude.
-    Each bin should overlay cleanly if the PSF shape is brightness-independent.
-    """
-    has_mag = mag_col in stars_tbl.colnames
-    fig, ax = plt.subplots(figsize=(8, 5))
-
-    # Overplot ePSF reference profile
-    half_epsf = epsf.data.shape[0] // 2
-    yy_e, xx_e = np.mgrid[-half_epsf:half_epsf+1,
-                           -half_epsf:half_epsf+1].astype(float)
-    epsf_stamp = epsf.evaluate(xx_e, yy_e, 1.0, 0.0, 0.0)
-    epsf_stamp /= epsf_stamp.max()
-    r_e = np.sqrt(xx_e**2 + yy_e**2).ravel()
-    bin_edges = np.linspace(0, r_e.max(), n_bins + 1)
-    bin_cen   = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-    epsf_prof = np.array([
-        np.mean(epsf_stamp.ravel()[(r_e >= bin_edges[i]) & (r_e < bin_edges[i+1])])
-        if np.any((r_e >= bin_edges[i]) & (r_e < bin_edges[i+1])) else np.nan
-        for i in range(n_bins)
-    ])
-    ax.plot(bin_cen, epsf_prof, 'k-', lw=2, label='ePSF reference')
-
-    if has_mag:
-        mags    = np.asarray(stars_tbl[mag_col], dtype=float)
-        mag_bins = np.percentile(mags[np.isfinite(mags)], np.linspace(0, 100, n_mag_bins + 1))
-        colors  = plt.cm.plasma(np.linspace(0.1, 0.9, n_mag_bins))
-
-        for k in range(n_mag_bins):
-            mask = (mags >= mag_bins[k]) & (mags < mag_bins[k + 1])
-            profiles = []
-            for row in stars_tbl[mask]:
-                xc = float(row['x_pix'] if 'x_pix' in row.colnames else row['x'])
-                yc = float(row['y_pix'] if 'y_pix' in row.colnames else row['y'])
-                cutout, xx, yy, _ = extract_cutout_grid(image, xc, yc, half_size)
-                cutout_norm = cutout / max(cutout.max(), 1e-10)
-                r = np.sqrt((xx - xc)**2 + (yy - yc)**2).ravel()
-                prof = np.array([
-                    np.mean(cutout_norm.ravel()[(r >= bin_edges[i]) & (r < bin_edges[i+1])])
-                    if np.any((r >= bin_edges[i]) & (r < bin_edges[i+1])) else np.nan
-                    for i in range(n_bins)
-                ])
-                profiles.append(prof)
-            if profiles:
-                med_prof = np.nanmedian(profiles, axis=0)
-                lbl = f'G_RP {mag_bins[k]:.1f}–{mag_bins[k+1]:.1f}  (N={mask.sum()})'
-                ax.plot(bin_cen, med_prof, color=colors[k], lw=1.5, label=lbl)
-
-    ax.set_xlabel('Radius [px]')
-    ax.set_ylabel('Normalised profile')
-    ax.set_title('Radial profile by magnitude bin\n'
-                 '(curves should overlap if PSF is brightness-independent)')
-    ax.legend(fontsize=8)
-    ax.set_yscale('log')
-    plt.tight_layout()
-    plt.show()
 
 if __name__ == '__main__':
 
     restore = True # if False, generate using the image defined below
 
     home_dir = str(Path.home())
-
+ 
     # if the user does not already have the psf, generate
     if not os.path.exists(f'{home_dir}/tierras/tierras_red/psfs/defocused_psf.fits'):
         print('Defocused PSF does not exist! Generating.')
@@ -517,7 +275,7 @@ if __name__ == '__main__':
     header  = hdul[0].header
     exptime = header['EXPTIME']
 
-    stars_tbl = Table.from_pandas(source_selection(file_list, rp_mag_limit=14))
+    stars_tbl = Table.from_pandas(source_selection(file_list, rp_mag_limit=15, overwrite=True))
     stars_tbl.rename_column('X pix', 'x')
     stars_tbl.rename_column('Y pix', 'y')
 
@@ -544,32 +302,87 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.show()
 
-    breakpoint()
+    i    = 0
+    plot = False
+    GAIN = 5.9
+    half = 100
 
-    # now generate a model image using the stars used for the epsf
+    epsf_interp = epsf_interp(epsf)
+    
+    psf_flux_per_s = np.zeros(len(stars_tbl))
+    ap_flux_per_s  = np.zeros_like(psf_flux_per_s)
+    for i in range(len(stars_tbl)):
+        print(f'Fitting star {i+1} of {len(stars_tbl)}')
+        xi, yi = float(stars_tbl['x'][i]), float(stars_tbl['y'][i])
+        cutout, x_c0, y_c0 = make_cutout(image_sub, xi, yi, half)
 
-    fig, ax = plt.subplots(3, 1, figsize=(10, 10), sharex=True, sharey=True)
+        yy, xx = np.mgrid[0:cutout.shape[0], 0:cutout.shape[1]].astype(float)
 
-    norm = simple_norm(image_sub, min_percent=1, max_percent=99)
-    ax[0].imshow(image_sub, origin='lower', norm=norm)
-    ax[0].plot(stars_tbl['x'], stars_tbl['y'], 'rx')
+        r = fit_epsf(cutout, epsf_interp)
 
-    fluxes = gaia_rp_to_counts(stars_tbl['phot_rp_mean_mag'], exptime, coeff=9.7e8/250)
-    model, info_tbl = render_psf_model(epsf, stars_tbl['x'], stars_tbl['y'], fluxes, )
+        x_fit, y_fit, flux_fit = r.x
+        print(f"x_fit={x_fit:.2f}  y_fit={y_fit:.2f}  flux={flux_fit:.1f}")
 
-    ax[1].imshow(model, origin='lower', norm=norm)
-    ax[1].plot(stars_tbl['x'], stars_tbl['y'], 'rx')
+        # ── Render fitted model ───────────────────────────────────────────────────────
+        model_image = flux_fit * epsf_interp((yy - y_fit).ravel(),
+                                        (xx - x_fit).ravel(),
+                                        grid=False).reshape(cutout.shape)
+
+        if plot:
+            fig, axes = plt.subplots(1, 3, figsize=(14, 4), sharex=True, sharey=True)
+            norm = simple_norm(cutout, min_percent=1, max_percent=99)
+
+            axes[0].imshow(cutout,               origin='lower', norm=norm)
+            axes[0].plot(x_fit, y_fit, 'rx', ms=10)
+            axes[0].set_title('Data')
+
+            axes[1].imshow(model_image,          origin='lower', norm=norm)
+            axes[1].plot(x_fit, y_fit, 'rx', ms=10)
+            axes[1].set_title(f'Model  ({x_fit:.1f}, {y_fit:.1f})')
+
+            axes[2].imshow(cutout - model_image, origin='lower',
+                        norm=simple_norm(cutout - model_image, min_percent=1, max_percent=99))
+            axes[2].set_title('Residual')
+
+            plt.tight_layout()
+
+        psf_flux_per_s[i] = flux_fit / exptime * GAIN
+
+        # compare with aperture photometry 
+        ap = CircularAperture((half, half), r=50)
+        
+        if plot:
+            ap.plot(ax=axes[0], color='r')
+            breakpoint()
+
+        phot_tbl = aperture_photometry(cutout, ap)
+        ap_flux_per_s[i] = phot_tbl['aperture_sum'][0]/exptime * GAIN
 
 
-    res_img = image_sub - model 
-    ax[2].imshow(res_img, origin='lower', norm=norm)
-    ax[2].plot(stars_tbl['x'], stars_tbl['y'], 'rx')
+    # do an initial baselining of the fluxes so that we can sigma clip outliers 
+    model_flux_init = 9.7e8*10**(-stars_tbl['phot_rp_mean_mag']/2.5) # coefficient from fit in instrument paper
+    baselined_fluxes_init = psf_flux_per_s / model_flux_init
+    v, lo, hi, = sigmaclip(baselined_fluxes_init, 3.5, 3.5)
+    keep_inds = np.where((baselined_fluxes_init > lo) & (baselined_fluxes_init < hi))[0]
 
+    # now fit to fluxes without outliers 
+    x = stars_tbl['phot_rp_mean_mag'][keep_inds]
+    y = psf_flux_per_s[keep_inds]
 
-    HALF_SIZE = 150
-    SATURATION = 55000.
-    diag = diagnose_psf_variation(image_sub, stars_tbl, HALF_SIZE, saturation=SATURATION)
+    plt.figure()
+    plt.plot(x, y, '.')
+    plt.yscale('log')
 
-    plot_psf_variation(diag, image_shape=image_sub.shape)
-    plot_radial_profile_comparison(image_sub, stars_tbl, epsf, HALF_SIZE)
+    popt, pcov = curve_fit(flux_model, x, y, p0=[9.7e8])
+
+    model_mags   = np.arange(4, 17, 0.1)
+    model_fluxes = flux_model(model_mags, popt[0])
+
+    plt.plot(model_mags, model_fluxes, label=f'Calibration from Defocused PSF fluxes: A={popt[0]:.1e} e-/s')
+    plt.plot(model_mags, flux_model(model_mags, 9.7e8), label=f'Calibration from instrument paper: A=9.7e+08 e-/s')
+    plt.legend()
+    plt.ylabel('e- / s', fontsize=14)
+    plt.xlabel('$G_\\text{RP}$ (mag)', fontsize=14)
+    plt.tick_params(labelsize=12)
+    plt.tight_layout()
     breakpoint()

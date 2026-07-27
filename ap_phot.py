@@ -495,7 +495,7 @@ def source_selection(file_list, logger=None, ra=None, dec=None, min_snr=10, edge
 		if logger is not None:
 			logger.debug(f'Local Gaia query failed! Trying web query.')
 		res = query_gaia_source(coord, width, height, rp_mag_limit)
-	
+
 	# Do a separate search for objects in the Bailer-Jones 'photogeo' catalog
 	try:
 		res2 = query_bailer_jones_local(wcs, im_shape)
