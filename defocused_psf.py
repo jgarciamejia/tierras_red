@@ -25,7 +25,7 @@ from photutils.psf import (
 from scipy.interpolate import RectBivariateSpline
 from scipy.optimize import least_squares, curve_fit
 from scipy.stats import sigmaclip
-from ap_phot import plot_image, source_selection
+# from ap_phot import source_selection # this causes a circular import issue when running ap_phot, need to move source_selection to a different utils file
 
 def build_epsf(image_sub, stars_tbl, r_outer,
                oversampling=2, max_stars=40, min_separation=None):
@@ -105,8 +105,7 @@ def save_epsf_fits(epsf):
     epsf      : EPSFModel  — the PSF to save
     filepath  : str/Path   — output file path (e.g. 'psf.fits')
     overwrite : bool — overwrite existing file
-    """
-    home_dir = str(Path.home())
+    """ 
 
     hdu = fits.PrimaryHDU(data=epsf.data.astype(np.float64))
     hdr = hdu.header
@@ -125,7 +124,7 @@ def save_epsf_fits(epsf):
     hdr['DATE']    = (Time.now().isot,   'File creation date (UTC)')
     hdr['CREATOR'] = ('photutils',       'PSF builder software')
 
-    fits.HDUList([hdu]).writeto(f'{home_dir}/tierras/tierras_red/psfs/defocused_psf.fits', overwrite=True)
+    fits.HDUList([hdu]).writeto(f'/data/tierras/psfs/defocused_psf.fits', overwrite=True)
     return 
 
 def load_epsf_fits(filepath):
@@ -254,15 +253,11 @@ if __name__ == '__main__':
 
     restore = True # if False, generate using the image defined below
 
-    home_dir = str(Path.home())
  
     # if the user does not already have the psf, generate
-    if not os.path.exists(f'{home_dir}/tierras/tierras_red/psfs/defocused_psf.fits'):
+    if not os.path.exists('/data/tierras/psfs/defocused_psf.fits'):
         print('Defocused PSF does not exist! Generating.')
         restore = False
-        # if the user does not have a psfs folder in tierras_red, generate it
-        if not os.path.exists(f'{home_dir}/tierras/tierras_red/psfs/'):
-            os.mkdir(f'{home_dir}/tierras/tierras_red/psfs/')
 
     date    = '20260621'
     target  = 'HIP107350'
@@ -292,7 +287,7 @@ if __name__ == '__main__':
 
         save_epsf_fits(epsf)
     else:
-        epsf = load_epsf_fits(f'{home_dir}/tierras/tierras_red/psfs/defocused_psf.fits')
+        epsf = load_epsf_fits('/data/tierras/psfs/defocused_psf.fits')
 
     plt.figure(figsize=(6, 5))
     plt.imshow(epsf.data, origin="lower", cmap="inferno")
@@ -301,6 +296,8 @@ if __name__ == '__main__':
     plt.title(f"Empirical PSF  (oversampling={epsf.oversampling[0]}×)")
     plt.tight_layout()
     plt.show()
+
+    breakpoint()
 
     i    = 0
     plot = False

@@ -61,6 +61,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq 
 from astroquery.simbad import Simbad
 from astropy_healpix import HEALPix      
+from defocused_psf import load_epsf_fits, epsf_interp, generate_defocused_psf
 
 # from fwhm import *
 # from astropy.utils import iers # IMPLEMENTED DUE TO ERRORS DOWNLOADING IERS DATA 20250131. REMOVE AT LATER DATE 
@@ -280,8 +281,13 @@ def query_gaia_source_local(coord, wcs, im_shape, rp_mag_limit, logger=None):
 			continue
 
 		tab = Table(hdul[1].data)
-
+		
+		if ra_min > ra_max: # this happens when the field RA is near 360 degrees and you get wraparound to 0 for ra_max. 
+			ra_max += 360
+			tab['ra'][np.where(tab['ra'] < 180)[0]] += 360
+		
 		source_inds = np.where((tab['ra'] > ra_min) & (tab['ra'] < ra_max) & (tab['dec'] > dec_min) & (tab['dec'] < dec_max) & (tab['phot_rp_mean_mag'] <= rp_mag_limit))[0]
+
 		if len(source_inds) > 0:
 			sources.append(tab[source_inds])
 
@@ -305,7 +311,6 @@ def query_gaia_source_local(coord, wcs, im_shape, rp_mag_limit, logger=None):
 		res.sort(keys='phot_rp_mean_mag')
 	except:
 		print('local query failed???')
-		
 	return res 
 
 def query_bailer_jones(coord, width, height, rp_mag_limit):
@@ -358,7 +363,7 @@ def query_bailer_jones_local(wcs, im_shape):
 	return res2 
 
 
-def source_selection(file_list, logger=None, ra=None, dec=None, min_snr=10, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, contamination_limit=0.01, rp_mag_limit=17, is_thwomp=False, targ_distance_cut=150):
+def source_selection(file_list, logger=None, ra=None, dec=None, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, rp_mag_limit=17, is_thwomp=False, targ_distance_cut=150, thwomp_contamination_limit=1.01):
 	'''
 		PURPOSE: identify sources in a Tierras field over a night
 		INPUTS: 
@@ -605,8 +610,87 @@ def source_selection(file_list, logger=None, ra=None, dec=None, min_snr=10, edge
 	if logger is not None:
 		logger.debug(f'Found {len(res)} sources in Gaia query.')
 
+	# for THWOMP (defocused) fields, model the defocused psfs and cut any with high contamination
+	if is_thwomp:
+		targ_ind = np.nanargmin(np.sqrt((res['X pix']-targ_x)**2 + (res['Y pix']-targ_y)**2))
+	
+		# read in and normalize pre-generated ePSF for defocused THWOMP images
+
+		epsf = epsf_interp(load_epsf_fits(f'/data/tierras/psfs/defocused_psf.fits'))
+
+		exptime = header['EXPTIME'] # is this general?
+		contaminated_inds = []
+		
+		res['contamination'] = np.zeros(len(res))
+
+		sim_img_shape = (200,200)
+
+
+		for i in range(len(res)):
+
+			if logger is not None:
+				logger.debug(f'Estimating contamination for source {i+1} of {len(res)}')
+
+			source_x = res['X pix'][i]
+			source_y = res['Y pix'][i]
+			source_rp = res['phot_rp_mean_mag'][i] 
+
+			source_dists = np.sqrt((res['X pix']-source_x)**2 + (res['Y pix']-source_y)**2)
+			
+			# remove any sources too close to the target
+			near_inds = np.where((source_dists <= targ_distance_cut) & (np.arange(len(res)) != targ_ind))[0]
+
+			if len(near_inds) > 0:
+				nearby_rp = np.array(res['phot_rp_mean_mag'][near_inds])
+				nearby_x = np.array(res['X pix'][near_inds] - source_x) + sim_img_shape[1]/2
+				nearby_y = np.array(res['Y pix'][near_inds] - source_y) + sim_img_shape[0]/2
+
+				# sometimes the rp mag is nan, remove these entries
+				use_inds = np.where(~np.isnan(nearby_rp))[0]
+				nearby_rp = nearby_rp[use_inds]
+				nearby_x = nearby_x[use_inds]
+				nearby_y = nearby_y[use_inds]
+
+				# enforce that a nearby source cannot have the same rp magnitude as the source in question, that's almost certainly a duplicate
+				use_inds = np.where(nearby_rp != source_rp)
+				nearby_rp = nearby_rp[use_inds]
+				nearby_x = nearby_x[use_inds]
+				nearby_y = nearby_y[use_inds]
+
+
+				# add this source to a simulated image and place a circular aperture to measure its expected flux without any contamination 
+
+				sim_img = generate_defocused_psf(sim_img_shape[1]/2, sim_img_shape[0]/2, source_rp, sim_img_shape, epsf, exptime=exptime)
+				ap = CircularAperture((sim_img_shape[1]/2, sim_img_shape[0]/2), r=60)
+				source_flux = aperture_photometry(sim_img, ap)['aperture_sum'][0]
+
+				# now add in nearby sources
+				for jj in range(len(nearby_rp)): 
+					sim_img += generate_defocused_psf(nearby_x[jj], nearby_y[jj], nearby_rp[jj], sim_img.shape, epsf, exptime=exptime)
+				
+				# now measure the source flux again with the contaminating sources added in
+				source_flux_contaminated = aperture_photometry(sim_img, ap)['aperture_sum'][0]
+				contamination = source_flux_contaminated / source_flux
+				res['contamination'][i] = contamination
+
+				if (contamination > thwomp_contamination_limit) and (i != targ_ind): # never remove the target!
+					contaminated_inds.append(i)
+
+		res.remove_rows(np.array(contaminated_inds))
+		logger.info(f'Removed {len(contaminated_inds)} contaminated THWOMP sources above contamination limit of {thwomp_contamination_limit}.')
+
+		# do an additional cut based on the brightness of sources
+		# G_RP = 13 seems reasonable
+		faint_inds = np.where(res['phot_rp_mean_mag'] > 13)[0]
+		res.remove_rows(np.array(faint_inds))
+		logger.info(f'Removed {len(faint_inds)} THWOMP sources fainter than G_RP = 13 mag.')
+
 	#Cut to sources that are away from the edges
-	use_inds = np.where((res['Y pix'] > edge_limit) & (res['Y pix']<im_shape[0]-edge_limit-1) & (res['X pix'] > edge_limit) & (res['X pix'] < im_shape[1]-edge_limit-1))[0]
+	if is_thwomp:
+		edge_limit = 100 # defocused psfs need more edge padding 
+	use_inds = np.where((res['Y pix'] > edge_limit) & (res['Y pix']<im_shape[0]
+	-edge_limit-1) & (res['X pix'] > edge_limit) & (res['X pix'] < im_shape[1]-edge_limit-1))[0]
+	
 	if logger is not None:
 		logger.debug(f'Removed {len(res)-len(use_inds)} sources that are within {edge_limit} pixels of the detector edges.')
 	res = res[use_inds]
@@ -627,18 +711,6 @@ def source_selection(file_list, logger=None, ra=None, dec=None, min_snr=10, edge
 	if logger is not None:
 		logger.debug(f'Removed {len(bad_inds_half)} sources that were too near the divide between the upper and lower detector halves.')
 
-	# for THWOMP (defocused) fields, the donut PSFs are large and overlapping, so cut any
-	# sources within targ_distance_cut pixels of the target to avoid contaminating it
-	if is_thwomp:
-		targ_ind = np.nanargmin(np.sqrt((res['X pix']-targ_x)**2 + (res['Y pix']-targ_y)**2))
-		targ_dists = np.sqrt((res['X pix']-res['X pix'][targ_ind])**2 + (res['Y pix']-res['Y pix'][targ_ind])**2)
-		near_inds = np.where((targ_dists <= targ_distance_cut) & (np.arange(len(res)) != targ_ind))[0]
-		res.remove_rows(near_inds)
-		if logger is not None:
-			logger.debug(f'Removed {len(near_inds)} sources within {targ_distance_cut} pixels of the target (THWOMP field).')
-
-		# breakpoint()
-
 	if logger is not None:
 		logger.info(f'Found {len(res)} sources!')
 
@@ -652,12 +724,16 @@ def source_selection(file_list, logger=None, ra=None, dec=None, min_snr=10, edge
 		ax1.set_ylabel('M$_{G}$', fontsize=14)
 		ax1.tick_params(labelsize=12)
 		plt.tight_layout()
+		print('plot')
 		breakpoint()	
 
 	# create the output dataframe consisting of the target as the 0th entry and the reference stars
-	output_table = copy.deepcopy(res)
+	# try:
+	# 	output_table = copy.deepcopy(res)
+	# except:
+	# 	breakpoint()
 
-	output_df = output_table.to_pandas()
+	output_df = res.to_pandas()
 	output_df.to_csv(source_path, index=0)
 	set_tierras_permissions(source_path)
 
@@ -2825,8 +2901,6 @@ def main(raw_args=None):
 
 	median_ra, median_dec = get_median_field_pointing(target)
 
-	if is_thwomp: # for thwomp targets, can only do meaningful photometry out to G_rp = 11ish 
-		rp_mag_limit = 11
 
 	# identify sources in the field 
 	sources = source_selection(flattened_files, logger, ra=median_ra, dec=median_dec, edge_limit=edge_limit, plot=plot_source_detection, overwrite=True, rp_mag_limit=rp_mag_limit, is_thwomp=is_thwomp)
