@@ -638,15 +638,15 @@ def load_epsf_fits(filepath):
 	IterativePSFPhotometry, regardless of photutils version.
 	"""
 	# Version-aware import (photutils API changed across versions)
-	# try:
-	# 	from photutils.psf import EPSFModel             # photutils < 2.0
-	# except ImportError:
-	# 	try:
-	# 		from photutils.psf import FittableImageModel as EPSFModel
-	# 	except ImportError:
-	# 		from photutils.psf import ImagePSF as EPSFModel  # photutils >= 1.9
+	try:
+		from photutils.psf import EPSFModel             # photutils < 2.0
+	except ImportError:
+		try:
+			from photutils.psf import FittableImageModel as EPSFModel
+		except ImportError:
+			from photutils.psf import ImagePSF as EPSFModel  # photutils >= 1.9
 
-	from photutils.psf import ImagePSF
+	# from photutils.psf import ImagePSF
 	with fits.open(filepath) as hdul:
 		data = hdul[0].data.astype(np.float64)
 		hdr  = hdul[0].header
@@ -659,7 +659,7 @@ def load_epsf_fits(filepath):
 	oversampling = os_x if (os_x == os_y) else (os_x, os_y)
 	origin       = (orig_x, orig_y)
 
-	epsf = ImagePSF(data=data, oversampling=oversampling, origin=origin)
+	epsf = EPSFModel(data=data, oversampling=oversampling, origin=origin)
 	# print(f"Loaded ePSF  shape={data.shape}  "
 	# 	  f"oversampling={oversampling}  ← {filepath}")
 	return epsf
