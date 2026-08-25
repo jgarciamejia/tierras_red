@@ -22,10 +22,10 @@ from photutils.psf import (
     PSFPhotometry
 )
 
-from scipy.interpolate import RectBivariateSpline
 from scipy.optimize import least_squares, curve_fit
 from scipy.stats import sigmaclip
-# from ap_phot import source_selection # this causes a circular import issue when running ap_phot, need to move source_selection to a different utils file
+
+from tierras_red_utils import source_selection, load_epsf_fits, generate_defocused_psf, epsf_interp
 
 def build_epsf(image_sub, stars_tbl, r_outer,
                oversampling=2, max_stars=40, min_separation=None):
@@ -127,39 +127,6 @@ def save_epsf_fits(epsf):
     fits.HDUList([hdu]).writeto(f'/data/tierras/psfs/defocused_psf.fits', overwrite=True)
     return 
 
-def load_epsf_fits(filepath):
-    """
-    Load an EPSFModel from a FITS file saved by save_epsf_fits().
-
-    Returns an EPSFModel instance ready for PSFPhotometry /
-    IterativePSFPhotometry, regardless of photutils version.
-    """
-    # Version-aware import (photutils API changed across versions)
-    try:
-        from photutils.psf import EPSFModel             # photutils < 2.0
-    except ImportError:
-        try:
-            from photutils.psf import FittableImageModel as EPSFModel
-        except ImportError:
-            from photutils.psf import ImagePSF as EPSFModel  # photutils >= 1.9
-
-    with fits.open(filepath) as hdul:
-        data = hdul[0].data.astype(np.float64)
-        hdr  = hdul[0].header
-
-        os_x   = int(hdr.get('OVERSMPX', 1))
-        os_y   = int(hdr.get('OVERSMPY', os_x))
-        orig_x = float(hdr.get('ORIG_X',  (data.shape[1] - 1) / 2.0))
-        orig_y = float(hdr.get('ORIG_Y',  (data.shape[0] - 1) / 2.0))
-
-    oversampling = os_x if (os_x == os_y) else (os_x, os_y)
-    origin       = (orig_x, orig_y)
-
-    epsf = EPSFModel(data=data, oversampling=oversampling, origin=origin)
-    print(f"Loaded ePSF  shape={data.shape}  "
-          f"oversampling={oversampling}  ← {filepath}")
-    return epsf
-
 def make_cutout(image, xi, yi, half):
         """
         Cut out a (2*half x 2*half) region centred on (xi, yi),
@@ -189,29 +156,11 @@ def make_cutout(image, xi, yi, half):
 
         return cutout, x_c, y_c
 
-def epsf_interp(epsf):
-    # first diagnose the normalization of the ePSF
-    psf_data = epsf.data.copy()
-    os       = float(np.atleast_1d(epsf.oversampling)[0])
-    ny_os, nx_os = psf_data.shape
-
-    x_ax = (np.arange(nx_os) - (nx_os - 1) / 2.0) / os
-    y_ax = (np.arange(ny_os) - (ny_os - 1) / 2.0) / os
-    interp_raw = RectBivariateSpline(y_ax, x_ax, psf_data, kx=3, ky=3)
-
-    # Evaluate on a native pixel grid large enough to capture all flux
-    half_eval = int(max(nx_os, ny_os) / (2 * os)) + 10
-    yy_e, xx_e = np.mgrid[-half_eval:half_eval+1,
-                        -half_eval:half_eval+1].astype(float)
-    psf_native = interp_raw(yy_e.ravel(), xx_e.ravel(),
-                            grid=False).reshape(yy_e.shape)
-    
-    # now renormalize
-    norm_factor = psf_native.sum()
-    psf_data_norm = psf_data / norm_factor
-
-    interp = RectBivariateSpline(y_ax, x_ax, psf_data_norm, kx=3, ky=3)
-    return interp
+def flux_model(x, A):
+    """
+        fittable model of flux (e-/s) as a function of magnitude
+    """
+    return A*10**(-x/2.5)
 
 def fit_epsf(data, epsf_interp):
     """
@@ -228,25 +177,6 @@ def fit_epsf(data, epsf_interp):
     res = least_squares(residuals, x0=[x_c0, y_c0, float(data.sum())], method='lm')
 
     return res
-
-
-def flux_model(x, A):
-    """
-        fittable model of flux (e-/s) as a function of magnitude
-    """
-    return A*10**(-x/2.5)
-
-def generate_defocused_psf(x0, y0, rp_mag, shape, epsf_interp, gain=5.9, exptime=1):
-    yy, xx = np.mgrid[0:shape[0], 0:shape[1]].astype(float)
-
-    A = 1.21437174e+09 # e-/s, determined from fit of defocused sources in HIP107350 field on 20260621
-    flux = flux_model(rp_mag, A)
-    
-    model = flux * epsf_interp((yy - y0).ravel(),
-                (xx - x0).ravel(),
-                grid=False).reshape(shape) * exptime / gain # model in units of ADU
-    
-    return model
 
 
 if __name__ == '__main__':
