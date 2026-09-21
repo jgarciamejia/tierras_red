@@ -406,7 +406,7 @@ def source_selection(file_list, logger=None, ra=None, dec=None, edge_limit=20, p
 
 	#Cut to sources that are away from the edges
 	if is_thwomp:
-		edge_limit = 100 # defocused psfs need more edge padding 
+		edge_limit = 70 # defocused psfs need more edge padding 
 	use_inds = np.where((res['Y pix'] > edge_limit) & (res['Y pix']<im_shape[0]
 	-edge_limit-1) & (res['X pix'] > edge_limit) & (res['X pix'] < im_shape[1]-edge_limit-1))[0]
 	
@@ -415,12 +415,19 @@ def source_selection(file_list, logger=None, ra=None, dec=None, edge_limit=20, p
 	res = res[use_inds]
 	
 	# remove ref stars that are too close to the bad columns or the divide between the detector halves
-	bad_inds_col_1 = np.where((res['X pix'] >= 1431) & (res['X pix'] <= 1472) & (res['Y pix'] <= 1032))[0]
+	if not is_thwomp:
+		bad_inds_col_1 = np.where((res['X pix'] >= 1431) & (res['X pix'] <= 1472) & (res['Y pix'] <= 1032))[0]
+	else: # need larger tolerance for defocused thwomp images
+		bad_inds_col_1 = np.where((res['X pix'] >= 1380) & (res['X pix'] <= 1520) & (res['Y pix'] <= 1032))[0]
+
 	res.remove_rows(bad_inds_col_1)
 	if logger is not None:
 		logger.debug(f'Removed {len(bad_inds_col_1)} sources that were too near the bad pixel column in the lower detector half.')
 
-	bad_inds_col_2 = np.where((res['X pix'] >= 1771) & (res['X pix'] <= 1813) & (res['Y pix'] >= 1023))[0]
+	if not is_thwomp:
+		bad_inds_col_2 = np.where((res['X pix'] >= 1700) & (res['X pix'] <= 1860) & (res['Y pix'] >= 1023))[0]
+	else:
+		bad_inds_col_2 = np.where((res['X pix'] >= 1771) & (res['X pix'] <= 1813) & (res['Y pix'] >= 1023))[0]
 	res.remove_rows(bad_inds_col_2)
 	if logger is not None:
 		logger.debug(f'Removed {len(bad_inds_col_2)} sources that were too near the bad pixel column in the upper detector half.')
