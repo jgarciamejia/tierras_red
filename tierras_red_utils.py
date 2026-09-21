@@ -24,7 +24,6 @@ from photutils.aperture import CircularAperture, aperture_photometry
 from scipy.stats import sigmaclip
 import os
 import stat
-from fitsutil import *
 from pathlib import Path
 import copy
 import shutil
@@ -32,9 +31,56 @@ import warnings
 from astroquery.simbad import Simbad
 from astropy_healpix import HEALPix  
 from scipy.interpolate import RectBivariateSpline
+from glob import glob
+from fitsutil import *
 
 # Suppress all Astropy warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="astropy")
+
+def get_median_field_pointing(target):
+	file_paths = sorted(glob(f'/data/tierras/flattened/*/{target}/flat*/*_red.fit'))[::-1]
+	dates = np.unique(sorted([i.split('/')[4] for i in file_paths]))
+	
+	# user can specify dates to ignore for this calculation in /data/tierras/fields/TARGET/ignore_dates.txt
+	if os.path.exists(f'/data/tierras/fields/{target}/ignore_dates.txt'):
+		with open(f'/data/tierras/fields/{target}/ignore_dates.txt') as f:
+			ignore_dates = f.readlines()
+		ignore_dates = [i.strip() for i in ignore_dates]
+		file_paths = np.array(file_paths)
+		delete_inds = []
+		for i in range(len(file_paths)):
+			file_path = file_paths[i]
+			file_date = file_path.split('/')[4]
+			if file_date in ignore_dates:
+				delete_inds.append(i)
+
+		file_paths = np.delete(file_paths, delete_inds)
+
+	ras, decs = [], []
+	im_shape = (2048, 4096)
+	median_ra = 0
+	median_dec = 0 
+	pscale = 0.432
+	pscale_deg = pscale/3600
+	for i in range(len(file_paths)):
+		with fits.open(file_paths[i]) as hdul:
+			header = hdul[0].header
+			# ignore files with AGOFFX/Y = 0; these correspond to images where the acquire sequence failed
+			if header['AGOFFX'] != 0 and header['AGOFFY'] != 0:
+				wcs = WCS(header)
+				sc = wcs.pixel_to_world(im_shape[1]/2-1, im_shape[0]/2-1)
+				ras.append(sc.ra.value)
+				decs.append(sc.dec.value)
+				median_ra_loop = np.median(ras)
+				median_dec_loop = np.median(decs)
+				# allow the calculation to terminate early if the median ra and dec have converged to within a tenth of a pixel from their values the previous loop AND we've looked at at least 100 files
+				if abs(median_ra_loop - median_ra) < pscale_deg/10 and abs(median_dec_loop - median_dec) < pscale_deg/10 and i >= 100:
+					median_ra = median_ra_loop
+					median_dec = median_dec_loop
+					break
+				median_ra = median_ra_loop
+				median_dec = median_dec_loop
+	return median_ra, median_dec
 
 def source_selection(file_list, logger=None, ra=None, dec=None, edge_limit=20, plot=False, plate_scale=0.432, overwrite=False, rp_mag_limit=17, is_thwomp=False, targ_distance_cut=150, thwomp_contamination_limit=1.01):
 	'''
@@ -689,6 +735,7 @@ def epsf_interp(epsf):
 	return interp
 
 def generate_defocused_psf(x0, y0, rp_mag, shape, epsf_interp, gain=5.9, exptime=1):
+	"Will generate a defocused PSF for a given G_RP mag and exosure time in Tierras images in ADU"
 	def flux_model(x, A):
 		"""
 			fittable model of flux (e-/s) as a function of magnitude
@@ -705,3 +752,93 @@ def generate_defocused_psf(x0, y0, rp_mag, shape, epsf_interp, gain=5.9, exptime
 				grid=False).reshape(shape) * exptime / gain # model in units of ADU
 	
 	return model
+
+def get_flattened_files(date, target, ffname):
+	#Get a list of data files sorted by exposure number
+	'''
+		PURPOSE: 
+			Creates a list of flattened files associated with an input date, target, and ffname
+		INPUTS:
+			date (str): the dates of the observations in calendar YYYYMMDD format
+			target (str): the name of the target
+			ffname (str): the name of the flat field file
+		OUTPUTS:
+			sorted_files (numpy array): array of flattened files ordered by exposure number
+	'''
+
+	ffolder = '/data/tierras/flattened/'+date+'/'+target+'/'+ffname
+	red_files = []
+	for file in os.listdir(ffolder): 
+		if '_red.fit' in file:
+			red_files.append(ffolder+'/'+file)
+	sorted_files = np.array(sorted(red_files, key=lambda x: int(x.split('.')[1])))
+	sorted_files = np.array([Path(i) for i in sorted_files])
+
+	# logger.debug(f'Found {len(sorted_files)} files for {target} on {date}')
+	return sorted_files 
+
+
+def t_or_f(arg):
+	ua = str(arg).upper()
+	if 'TRUE'.startswith(ua):
+		return True
+	elif 'FALSE'.startswith(ua):
+		return False
+	else:
+		print(f'ERROR: check passed argument for {arg}.')
+
+def load_bad_pixel_mask():
+	#Load in the BPM. Code stolen from imred.py.
+	bpm_path = '/home/jmejia/tierras/git/sicamd/config/badpix.mask'
+	amplist = []
+	sectlist = []
+	vallist = []
+	with open(bpm_path, "r") as mfp:
+		for line in mfp:
+			ls = line.strip()
+			lc = ls.split("#", 1)
+			ln = lc[0]
+			if ln == "":
+				continue
+			amp, sect, value = ln.split()
+			xl, xh, yl, yh = fits_section(sect)
+			amplist.append(int(amp))
+			sectlist.append([xl, xh, yl, yh])
+			vallist.append(int(value))
+	amplist = np.array(amplist, dtype='int')
+	sectlist = np.array(sectlist, dtype='int')
+	vallist = np.array(vallist, dtype='int')
+
+	allamps = np.unique(amplist)
+
+	namps = len(allamps)
+
+	mask = [None] * namps
+
+	for amp in allamps:
+		ww = amplist == amp
+		thissect = sectlist[ww,:]
+		thisval = vallist[ww]
+
+		nx = np.max(thissect[:,1])
+		ny = np.max(thissect[:,3])
+
+		img = np.ones([ny, nx], dtype=np.uint8)
+
+		nsect = thissect.shape[0]
+
+		for isect in range(nsect):
+			xl, xh, yl, yh = thissect[isect,:]
+			img[yl:yh,xl:xh] = thisval[isect]
+
+		mask[amp-1] = img
+
+	#Combine everything into one map.
+	bad_pixel_mask = np.zeros((2048, 4096), dtype='uint8')
+	bad_pixel_mask[0:1024,:] = mask[0]
+	bad_pixel_mask[1024:,:] = mask[1]
+
+	#Interchange 0s and 1s to match SEP/Astropy bad pixel mask convention. 
+	bad_pixel_mask = np.where((bad_pixel_mask==0)|(bad_pixel_mask==1),bad_pixel_mask^1,bad_pixel_mask)
+
+	return bad_pixel_mask

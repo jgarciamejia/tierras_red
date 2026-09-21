@@ -18,6 +18,12 @@ import math
 import os
 import re
 import sys
+import time
+from glob import glob
+import matplotlib.pyplot as plt 
+plt.ion()
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Helvetica']
 
 import numpy as np
 from astropy.io import fits
@@ -25,36 +31,40 @@ from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 from astropy_healpix import HEALPix
+from astropy.visualization import simple_norm
 import sep
+from scipy.ndimage import gaussian_filter
+
+from tierras_red_utils import load_bad_pixel_mask
 
 GAIA_DIR = '/data/tierras/gaia_dr3/gaia_source'
 GAIA_EPOCH = 2016.0          # catalog reference epoch
-HEALPIX_LEVEL = 8            # nside = 256, as used in filenames
 PLATE_SCALE = 0.432          # arcsec/pix (nominal)
-DEFAULT_MAG_LIMIT = 17.5     # Gaia G mag; bright enough to detect reliably
-DEFAULT_SEARCH_RAD = 0.40    # degrees (~24 arcmin) — covers FOV + buffer
-DEFAULT_MATCH_TOL  = 10.0    # arcsec; generous to cope with ~5′ CRVAL offset
-MIN_MATCHES        = 10      # minimum matched pairs to accept a solution
-
-
-# ---------------------------------------------------------------------------
-# Gaia catalog helpers
-# ---------------------------------------------------------------------------
+DEFAULT_MAG_LIMIT = 13.0     # Gaia G mag; bright enough to detect reliably
+DEFAULT_SEARCH_RAD = 1.0     # degrees (~24 arcmin) — covers FOV + buffer
+DEFAULT_MATCH_TOL  = 60.0    # arcsec; generous to cope with ~5′ CRVAL offset
+MIN_MATCHES        = 5       # minimum matched pairs to accept a solution
+GAIA_FILE_HP_LEVEL = 8     # level implied by the filenames themselves
+QUERY_HP_LEVEL      = 6    # coarser level used for fast file selection
 
 def _build_file_index():
-    """Return list of (hp8_lo, hp8_hi, filename) for every Gaia file."""
     pat = re.compile(r'GaiaSource_(\d+)-(\d+)_sub\.fits')
-    index = []
+    los8, his8, paths = [], [], []
     for fname in os.listdir(GAIA_DIR):
         m = pat.match(fname)
         if m:
-            index.append((int(m.group(1)), int(m.group(2)),
-                          os.path.join(GAIA_DIR, fname)))
-    return index
+            los8.append(int(m.group(1)))
+            his8.append(int(m.group(2)))
+            paths.append(os.path.join(GAIA_DIR, fname))
+    los8 = np.asarray(los8)
+    his8 = np.asarray(his8)
+    shift = 2 * (GAIA_FILE_HP_LEVEL - QUERY_HP_LEVEL)
+    los6 = los8 >> shift
+    his6 = his8 >> shift
+    return los6, his6, paths
 
 
-_GAIA_INDEX = None   # cached after first call
-
+_GAIA_INDEX = None
 
 def _gaia_index():
     global _GAIA_INDEX
@@ -64,90 +74,111 @@ def _gaia_index():
 
 
 def query_gaia_local(ra_deg, dec_deg, radius_deg,
-                     mag_limit=DEFAULT_MAG_LIMIT,
-                     obs_epoch=2026.0):
-    """
-    Return Gaia DR3 stars within *radius_deg* of (ra_deg, dec_deg).
-
-    Proper motions are applied to bring positions from GAIA_EPOCH to
-    *obs_epoch*.  Returns a dict with numpy arrays:
-        ra, dec  — degrees, at obs_epoch
-        gmag     — Gaia G magnitude
-    """
-    hp = HEALPix(nside=2**HEALPIX_LEVEL, order='nested', frame='icrs')
+                      mag_limit=DEFAULT_MAG_LIMIT,
+                      obs_epoch=2026.0):
+    hp = HEALPix(nside=2**QUERY_HP_LEVEL, order='nested', frame='icrs')
     center = SkyCoord(ra_deg * u.deg, dec_deg * u.deg, frame='icrs')
-    target_pixels = set(hp.cone_search_skycoord(center,
-                                                radius=radius_deg * u.deg))
+    cone_pixels = np.asarray(hp.cone_search_skycoord(center, radius=radius_deg * u.deg))
+
+    los6, his6, paths = _gaia_index()
+
+    candidate_files = []
+    for lo6, hi6, fpath in zip(los6, his6, paths):
+        if np.any((lo6 <= cone_pixels) & (cone_pixels <= hi6)):
+            candidate_files.append(fpath)
 
     ra_all, dec_all, gmag_all = [], [], []
 
-    for hp8_lo, hp8_hi, fpath in _gaia_index():
-        # quick range check — skip files with no overlap
-        if hp8_hi < min(target_pixels) or hp8_lo > max(target_pixels):
-            continue
+    print(len(candidate_files))
+
+    i = 0
+    for fpath in candidate_files:
+        print(f'Doing {fpath} ({i+1} of {len(candidate_files)})')
+
         if not os.path.exists(fpath):
             continue
+        hdul = fits.open(fpath, columns=['phot_g_mean_mag', 'ra', 'dec', 'pmra', 'pmdec'] )
 
-        with fits.open(fpath, memmap=True) as hdul:
-            d = hdul[1].data
-
-        # magnitude filter first (cheap)
+        d = hdul[1].data
         gmag = d['phot_g_mean_mag']
+
+        # t2 = time.time()
         keep = gmag <= mag_limit
+        # print(f'    Data access: {time.time()-t2:.2} s')
+        
         if not np.any(keep):
             continue
 
-        ra   = np.radians(d['ra'][keep])
-        dec  = np.radians(d['dec'][keep])
-        gmag = gmag[keep]
-        pmra = d['pmra'][keep]   # mas/yr in RA*cos(dec)
-        pmdec= d['pmdec'][keep]  # mas/yr in Dec
+        ra    = np.radians(d['ra'][keep])
+        dec   = np.radians(d['dec'][keep])
+        gmag  = gmag[keep]
+        pmra  = d['pmra'][keep]
+        pmdec = d['pmdec'][keep]
 
-        # apply proper motion (linear approximation)
-        dep  = obs_epoch - GAIA_EPOCH
+
+        dep = obs_epoch - GAIA_EPOCH
         pmra_safe  = np.where(np.isfinite(pmra),  pmra,  0.0)
         pmdec_safe = np.where(np.isfinite(pmdec), pmdec, 0.0)
         mas2rad = math.pi / (180.0 * 3600.0 * 1000.0)
         ra  = ra  + dep * pmra_safe  * mas2rad / np.cos(dec)
         dec = dec + dep * pmdec_safe * mas2rad
 
-        # cone filter in angular distance
+
         cos_sep = (np.sin(dec) * math.sin(math.radians(dec_deg)) +
                    np.cos(dec) * math.cos(math.radians(dec_deg)) *
                    np.cos(ra - math.radians(ra_deg)))
         cos_limit = math.cos(math.radians(radius_deg))
         inside = cos_sep >= cos_limit
+
+        i += 1
         if not np.any(inside):
             continue
 
         ra_all.append(np.degrees(ra[inside]))
         dec_all.append(np.degrees(dec[inside]))
         gmag_all.append(gmag[inside])
-
+        
     if not ra_all:
         return None
 
-    return dict(ra=np.concatenate(ra_all),
-                dec=np.concatenate(dec_all),
-                gmag=np.concatenate(gmag_all))
+    ra_all   = np.concatenate(ra_all)
+    dec_all  = np.concatenate(dec_all)
+    gmag_all = np.concatenate(gmag_all)
+
+    # IMPORTANT (see bug #2 below): sort brightest-first so downstream code
+    # that slices "the first N gaia stars" actually gets the brightest ones.
+    order = np.argsort(gmag_all)
+    return dict(ra=ra_all[order], dec=dec_all[order], gmag=gmag_all[order])
 
 
 # ---------------------------------------------------------------------------
 # Source detection
 # ---------------------------------------------------------------------------
 
-def detect_sources(img, detection_sigma=5.0, min_area=5):
+def detect_sources(img, detection_sigma=2.0, min_area=2000):
     """Run SEP on *img*, return (x, y, flux) sorted brightest-first."""
     data = img.astype(np.float64)
-    mask = ~np.isfinite(data)
-    data[mask] = 0.0
+
+    mask = load_bad_pixel_mask()
+    #mask = ~np.isfinite(data)
+    # data[mask] = 0.0
+    data[np.where(mask == 1)] = np.nan
     bkg  = sep.Background(data, mask=mask)
     data -= bkg
-    sources = sep.extract(data, detection_sigma, err=bkg.globalrms,
-                          minarea=min_area, mask=mask)
-    order = np.argsort(sources['flux'])[::-1]
-    return sources['x'][order], sources['y'][order], sources['flux'][order]
 
+
+    smoothed_data = gaussian_filter(data, sigma=20/3)
+
+    sources = sep.extract(smoothed_data, detection_sigma, err=bkg.globalrms,
+                          minarea=min_area, mask=mask, deblend_cont=1.0)
+    order = np.argsort(sources['flux'])[::-1]
+
+    # plt.imshow(smoothed_data, origin='lower', norm=simple_norm(smoothed_data, min_percent=1, max_percent=99))
+    # plt.plot(sources['x'], sources['y'], 'rx')
+    # breakpoint() 
+
+    return sources['x'][order], sources['y'][order], sources['flux'][order]
+    
 
 # ---------------------------------------------------------------------------
 # WCS fitting
@@ -158,8 +189,8 @@ def _header_ra_dec(hdr):
     Parse the RA / DEC header keywords (sexagesimal or decimal degrees).
     Returns (ra_deg, dec_deg) or raises KeyError.
     """
-    ra_str  = hdr['RA']
-    dec_str = hdr['DEC']
+    ra_str  = hdr['AIM-RA']
+    dec_str = hdr['AIM-DEC']
 
     def _sexa(s):
         s = s.strip()
@@ -187,7 +218,8 @@ def fit_wcs(hdr, src_x, src_y,
             ra_center, dec_center,
             gaia,
             match_tol_arcsec=DEFAULT_MATCH_TOL,
-            min_matches=MIN_MATCHES):
+            min_matches=MIN_MATCHES,
+            search_radius_deg=DEFAULT_SEARCH_RAD):
     """
     Fit a new CRVAL + CD matrix given detected source pixel positions and
     a Gaia catalog.
@@ -225,7 +257,10 @@ def fit_wcs(hdr, src_x, src_y,
 
     # Project Gaia to pixel coords; keep a generous margin around the detector
     ny, nx = int(hdr.get('NAXIS2', 2048)), int(hdr.get('NAXIS1', 4096))
-    vote_radius_pix = 1200  # ~8.6 arcmin — covers worst observed CRVAL errors
+
+    max_vote_radius_pix = search_radius_deg * 3600.0 / PLATE_SCALE
+    vote_radius_pix = min(max_vote_radius_pix, 20000)  # sane hard cap
+
     gx_all, gy_all = w.all_world2pix(gaia['ra'], gaia['dec'], 1)
     on_det = ((gx_all > -vote_radius_pix) & (gx_all < nx + vote_radius_pix) &
               (gy_all > -vote_radius_pix) & (gy_all < ny + vote_radius_pix))
@@ -249,7 +284,8 @@ def fit_wcs(hdr, src_x, src_y,
     dxs = (vsx[:, None] - vgx[None, :]).ravel()
     dys = (vsy[:, None] - vgy[None, :]).ravel()
 
-    bin_size = 5.0
+    n_bins_per_axis = 400  # keep histogram cost ~constant regardless of radius
+    bin_size = max(2.0, 2.0 * vote_radius_pix / n_bins_per_axis)
     bins = np.arange(-vote_radius_pix, vote_radius_pix + bin_size, bin_size)
     hist, _, _ = np.histogram2d(dxs, dys, bins=[bins, bins])
     peak = np.unravel_index(np.argmax(hist), hist.shape)
@@ -486,7 +522,8 @@ def solve_file(fitsfile,
                      ra_center, dec_center,
                      gaia,
                      match_tol_arcsec=match_tol_arcsec,
-                     min_matches=min_matches)
+                     min_matches=min_matches, 
+                     search_radius_deg=search_radius_deg)
     wcs_fit, nmatches, rms, matched_src_idx, matched_gaia_idx = result
 
     if wcs_fit is None:
@@ -550,8 +587,8 @@ def plot_solution(fitsfile, wcs, gaia, src_x, src_y,
     ax.imshow(img, origin='lower', cmap='gray', vmin=vmin, vmax=vmax,
               interpolation='nearest', aspect='equal')
 
-    # All detected sources — small grey crosses
-    ax.plot(src_x, src_y, '+', color='grey', ms=4, lw=0.5,
+    # All detected sources — small red crosses
+    ax.plot(src_x, src_y, '+', color='red', ms=4, lw=0.5,
             transform=ax.get_transform('pixel'),
             label=f'Detected ({len(src_x)})', zorder=2)
 
@@ -644,7 +681,9 @@ def _update_header(fitsfile, wcs, nmatches, rms_arcsec):
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('files', nargs='+', help='Reduced FITS files (_red.fit)')
+    ap.add_argument('-field', help='Name of field')
+    ap.add_argument('-date', help='Date of observations (YYYYMMDD)')
+    ap.add_argument('-ffname', default='flat0000', help='Name of flat directory')
     ap.add_argument('-r', '--radius', type=float, default=DEFAULT_SEARCH_RAD,
                     metavar='DEG', help='Gaia search radius in degrees (default %(default)s)')
     ap.add_argument('-m', '--maglim', type=float, default=DEFAULT_MAG_LIMIT,
@@ -662,7 +701,14 @@ if __name__ == '__main__':
                     help='Save plots to this directory instead of displaying interactively')
     args = ap.parse_args()
 
-    for f in args.files:
+    date = args.date 
+    field = args.field
+    ffname = args.ffname
+
+    flattened_dir = f'/data/tierras/flattened/{date}/{field}/{ffname}/'
+    files = sorted(glob(flattened_dir+'*_red.fit'))
+
+    for f in files:
         print(f'\n=== {f} ===')
         result = solve_file(f,
                             search_radius_deg=args.radius,

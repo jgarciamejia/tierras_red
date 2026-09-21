@@ -88,9 +88,9 @@ def main():
         # Skip targets whose reduced output already exists, so re-runs are idempotent
         # and don't collide with output owned by another user.
         existing_red = glob.glob(os.path.join(fpath, date, target, ffname, '*_red.fit'))
-        if existing_red:
-            print(f'  {target} already has {len(existing_red)} _red.fit files; skipping.')
-            continue
+        # if existing_red:
+        #     print(f'  {target} already has {len(existing_red)} _red.fit files; skipping.')
+        #     continue
 
         # Create flattened file and light curve directories
         ffolder = create_directories(fpath,date,target,ffname)
@@ -130,7 +130,8 @@ def main():
         # Exclude files where ASTROM solution fails and exptime diff. to mode of stack
         logging.info('Checking astrometric solution on plate solved files...')
 
-        is_thwomp = f'{target}_ref' in targets
+        # catch if the target is a TWHOMP target or reference field
+        is_thwomp = (f'{target}_ref' in targets) or ('_ref' in target)
 
 
         exptimes = np.array([])
