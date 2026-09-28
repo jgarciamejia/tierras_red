@@ -37,7 +37,7 @@ def run_command(command, description):
         notify_failure(f'Pipeline step failed: {description}')
         raise # stop the pipeline
 
-def main(run_now=False, skip_transfer=False, skip_flat=False, skip_reduction=False, skip_photometry=False, skip_light_curves=False, skip_db=False):
+def main(run_now=False, skip_transfer=False, skip_flat=False, skip_reduction=False, skip_photometry=False, skip_light_curves=False, skip_db=False, skip_thwomp_wcs=False):
     try: 
         if not run_now:
             # sleep until civil twilight at FLWO
@@ -107,6 +107,9 @@ def main(run_now=False, skip_transfer=False, skip_flat=False, skip_reduction=Fal
         if not skip_reduction:
             # from September 2025 onward, we flat field the data
             run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/sort_and_red_crontab.py -ffname flat0000 -f {super_flat}', 'Reduce data')
+        
+        if not skip_thwomp_wcs:
+            run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/update_thwomp_wcs.py -date {cal_date}', 'Update THWOMP WCS')
 
         if not skip_photometry:
             run_command(f'{PYTHON} /home/ptamburo/tierras/tierras_red/run_photometry.py', 'Run photometry') 
@@ -139,5 +142,7 @@ if __name__ == '__main__':
     parser.add_argument('-skip_photometry', action='store_true', help='Skip photometry')
     parser.add_argument('-skip_light_curves', action='store_true', help='Skip creation of light curves')
     parser.add_argument('-skip_db', action='store_true', help='Skip database update')
+    parser.add_argument('-skip_thwomp_wcs', action='store_true', help='Skip database update')
+
     args = parser.parse_args()
-    main(run_now=args.now, skip_transfer=args.skip_transfer, skip_flat=args.skip_flat, skip_reduction=args.skip_reduction, skip_photometry=args.skip_photometry, skip_light_curves=args.skip_light_curves, skip_db=args.skip_db)
+    main(run_now=args.now, skip_transfer=args.skip_transfer, skip_flat=args.skip_flat, skip_reduction=args.skip_reduction, skip_photometry=args.skip_photometry, skip_light_curves=args.skip_light_curves, skip_db=args.skip_db, skip_thwomp_wcs=args.skip_thwomp_wcs)

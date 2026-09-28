@@ -674,15 +674,46 @@ def _update_header(fitsfile, wcs, nmatches, rms_arcsec):
         hdul.flush()
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+def defocused_wcs_solver(date, field, ffname='flat0000',
+                          radius=DEFAULT_SEARCH_RAD,
+                          maglim=DEFAULT_MAG_LIMIT,
+                          tol=DEFAULT_MATCH_TOL,
+                          min_matches=MIN_MATCHES,
+                          write=False,
+                          plot=False,
+                          outdir=None):
 
-if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('-field', help='Name of field')
-    ap.add_argument('-date', help='Date of observations (YYYYMMDD)')
+    flattened_dir = f'/data/tierras/flattened/{date}/{field}/{ffname}/'
+    files = sorted(glob(flattened_dir+'*_red.fit'))
+
+    for f in files:
+        print(f'\n=== {f} ===')
+        result = solve_file(f,
+                            search_radius_deg=radius,
+                            mag_limit=maglim,
+                            match_tol_arcsec=tol,
+                            min_matches=min_matches,
+                            write=write)
+
+        if plot and result['wcs'] is not None:
+            outfile = None
+            if outdir:
+                stem = os.path.splitext(os.path.basename(f))[0]
+                outfile = os.path.join(outdir, stem + '_wcs.png')
+            plot_solution(f,
+                          result['wcs'],
+                          result['gaia'],
+                          result['src_x'],
+                          result['src_y'],
+                          result['matched_src_idx'],
+                          result['matched_gaia_idx'],
+                          result['rms_arcsec'],
+                          outfile=outfile)
+            
+def _cli():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('-field', required=True, help='Name of field')
+    ap.add_argument('-date', required=True, help='Date of observations (YYYYMMDD)')
     ap.add_argument('-ffname', default='flat0000', help='Name of flat directory')
     ap.add_argument('-r', '--radius', type=float, default=DEFAULT_SEARCH_RAD,
                     metavar='DEG', help='Gaia search radius in degrees (default %(default)s)')
@@ -701,33 +732,10 @@ if __name__ == '__main__':
                     help='Save plots to this directory instead of displaying interactively')
     args = ap.parse_args()
 
-    date = args.date 
-    field = args.field
-    ffname = args.ffname
+    defocused_wcs_solver(date=args.date, field=args.field, ffname=args.ffname,
+                          radius=args.radius, maglim=args.maglim, tol=args.tol,
+                          min_matches=args.min_matches, write=args.write,
+                          plot=args.plot, outdir=args.outdir)
 
-    flattened_dir = f'/data/tierras/flattened/{date}/{field}/{ffname}/'
-    files = sorted(glob(flattened_dir+'*_red.fit'))
-
-    for f in files:
-        print(f'\n=== {f} ===')
-        result = solve_file(f,
-                            search_radius_deg=args.radius,
-                            mag_limit=args.maglim,
-                            match_tol_arcsec=args.tol,
-                            min_matches=args.min_matches,
-                            write=args.write)
-
-        if args.plot and result['wcs'] is not None:
-            outfile = None
-            if args.outdir:
-                stem = os.path.splitext(os.path.basename(f))[0]
-                outfile = os.path.join(args.outdir, stem + '_wcs.png')
-            plot_solution(f,
-                          result['wcs'],
-                          result['gaia'],
-                          result['src_x'],
-                          result['src_y'],
-                          result['matched_src_idx'],
-                          result['matched_gaia_idx'],
-                          result['rms_arcsec'],
-                          outfile=outfile)
+if __name__ == '__main__':
+    _cli()
