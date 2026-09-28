@@ -12,9 +12,13 @@ import shlex
 from glob import glob 
 import numpy as np 
 
-logfile = '/data/tierras/log/pipeline.log'
+# Determine which night's data this run corresponds to (yesterday, UTC) so we
+# can log to a separate file for each night the pipeline runs.
+cal_date = Time(datetime.now(timezone.utc)-timedelta(days=1)).strftime('%Y%m%d')
+logfile = f'/data/tierras/log/pipeline_{cal_date}.log'
 logging.basicConfig(filename=logfile, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-emails = ['patrick.tamburo@cfa.harvard.edu', 'juliana.garcia-mejia@cfa.harvard.edu', 'adam.distler@cfa.harvard.edu']
+# emails = ['patrick.tamburo@cfa.harvard.edu', 'juliana.garcia-mejia@cfa.harvard.edu', 'adam.distler@cfa.harvard.edu']
+emails = []
 
 def notify_failure(subject): 
     # email Pat / Juliana / Adam if the pipeline breaks
@@ -58,7 +62,9 @@ def main(run_now=False, skip_transfer=False, skip_flat=False, skip_reduction=Fal
         return
 
     try: 
-        cal_date = Time(datetime.now(timezone.utc)-timedelta(days=1)).strftime('%Y%m%d')
+        # cal_date was already computed at module import time (used to name the log file);
+        # reuse it here rather than recomputing
+        global cal_date 
 
         PYTHON = '/opt/cfpython/python-3.11.9/bin/python' # this is needed to work with crontab
 
@@ -139,10 +145,10 @@ if __name__ == '__main__':
     parser.add_argument('-skip_transfer', action='store_true', help='Skip data transfer from telescope')
     parser.add_argument('-skip_flat', action='store_true', help='Skip creation of flat/superflat')
     parser.add_argument('-skip_reduction', action='store_true', help='Skip reduction of data')
+    parser.add_argument('-skip_thwomp_wcs', action='store_true', help='Skip database update')
     parser.add_argument('-skip_photometry', action='store_true', help='Skip photometry')
     parser.add_argument('-skip_light_curves', action='store_true', help='Skip creation of light curves')
     parser.add_argument('-skip_db', action='store_true', help='Skip database update')
-    parser.add_argument('-skip_thwomp_wcs', action='store_true', help='Skip database update')
 
     args = parser.parse_args()
     main(run_now=args.now, skip_transfer=args.skip_transfer, skip_flat=args.skip_flat, skip_reduction=args.skip_reduction, skip_photometry=args.skip_photometry, skip_light_curves=args.skip_light_curves, skip_db=args.skip_db, skip_thwomp_wcs=args.skip_thwomp_wcs)
