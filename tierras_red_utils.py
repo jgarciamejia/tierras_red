@@ -225,7 +225,7 @@ def source_selection(file_list, logger=None, ra=None, dec=None, edge_limit=20, p
 		res2 = query_bailer_jones_local(wcs, im_shape)
 	except:
 		res2 = query_bailer_jones(coord, width, height, rp_mag_limit)
-	
+
 	# add the Bailer-Jones data into the main table 
 	for key in res2.keys()[1:]:
 		res[key] = np.zeros(len(res))
@@ -602,13 +602,13 @@ def query_gaia_source_local(coord, wcs, im_shape, rp_mag_limit, logger=None):
 			continue
 
 		tab = Table(hdul[1].data)
-		
+
 		if ra_min > ra_max: # this happens when the field RA is near 360 degrees and you get wraparound to 0 for ra_max. 
 			ra_max += 360
 			tab['ra'][np.where(tab['ra'] < 180)[0]] += 360
 		
 		source_inds = np.where((tab['ra'] > ra_min) & (tab['ra'] < ra_max) & (tab['dec'] > dec_min) & (tab['dec'] < dec_max) & (tab['phot_rp_mean_mag'] <= rp_mag_limit))[0]
-
+		
 		if len(source_inds) > 0:
 			sources.append(tab[source_inds])
 
@@ -632,6 +632,7 @@ def query_gaia_source_local(coord, wcs, im_shape, rp_mag_limit, logger=None):
 		res.sort(keys='phot_rp_mean_mag')
 	except:
 		print('local query failed???')
+
 	return res 
 
 def query_bailer_jones(coord, width, height, rp_mag_limit):
@@ -658,30 +659,65 @@ def query_bailer_jones(coord, width, height, rp_mag_limit):
 def query_bailer_jones_local(wcs, im_shape):
 	bailerjones_path = '/data/tierras/gaia_dr3/bailer_jones/'
 
-	ra_min = np.min([wcs.pixel_to_world(0,0).ra.value, wcs.pixel_to_world(im_shape[1],0).ra.value])
-	ra_max = np.max([wcs.pixel_to_world(0,im_shape[0]).ra.value, wcs.pixel_to_world(im_shape[1],im_shape[0]).ra.value])
-	dec_min = np.min([wcs.pixel_to_world(im_shape[1],0).dec.value, wcs.pixel_to_world(im_shape[1],im_shape[0]).dec.value])
-	dec_max = np.min([wcs.pixel_to_world(0,0).dec.value, wcs.pixel_to_world(0,im_shape[0]).dec.value])
+	# Get RA/Dec of all 4 corners
+	corners = [
+		wcs.pixel_to_world(0, 0),
+		wcs.pixel_to_world(im_shape[1], 0),
+		wcs.pixel_to_world(0, im_shape[0]),
+		wcs.pixel_to_world(im_shape[1], im_shape[0]),
+	]
+	ras = np.array([c.ra.value for c in corners])
+	decs = np.array([c.dec.value for c in corners])
 
-	# now do the same thing for the bailer-jones data
-	bj_ra_start = np.floor(ra_min*10)/10
-	bj_ra_end = np.ceil(ra_max*10)/10
-	bj_file_ras = np.arange(bj_ra_start, bj_ra_end, 0.1)
+	# Detect wraparound: if the raw spread is > 180 deg, the field
+	# straddles the 0/360 boundary. Shift values > 180 down by 360
+	# so min/max behave correctly, then wrap back into [0, 360).
+	if ras.max() - ras.min() > 180:
+		ras = np.where(ras > 180, ras - 360, ras)
+
+	ra_min = ras.min() % 360
+	ra_max = ras.max() % 360
+	wraps = ra_min > ra_max  # True if field straddles 0/360
+
+	dec_min = decs.min()
+	dec_max = decs.max()
+
+	bj_ra_start = np.floor(ra_min * 10) / 10
+	bj_ra_end = np.ceil(ra_max * 10) / 10
+
+	num_steps = int(round((bj_ra_end - bj_ra_start) % 360 / 0.1)) + 1
+	bj_file_ras = np.array([np.round(i, 1) for i in
+							 (bj_ra_start + np.arange(num_steps) * 0.1) % 360])
+
 	bj_sources = []
+	res2 = None
 	for i in range(len(bj_file_ras)):
-		hdul = fits.open(bailerjones_path+f'gedr3dist_RA_{bj_file_ras[i]:.1f}.fits')
-		tab = Table(hdul[1].data, names=['source_id', 'ra', 'dec', 'r_med_geo','r_lo_geo','r_hi_geo','r_med_photogeo','r_lo_photogeo','r_hi_photogeo','flag'])
-		source_inds = np.where((tab['ra'] > ra_min) & (tab['ra'] < ra_max) & (tab['dec'] > dec_min) & (tab['dec'] < dec_max))[0]
+		hdul = fits.open(bailerjones_path + f'gedr3dist_RA_{bj_file_ras[i]:.1f}.fits')
+		tab = Table(hdul[1].data, names=['source_id', 'ra', 'dec', 'r_med_geo',
+										  'r_lo_geo', 'r_hi_geo', 'r_med_photogeo',
+										  'r_lo_photogeo', 'r_hi_photogeo', 'flag'])
+
+		if wraps:
+			ra_mask = (tab['ra'] > ra_min) | (tab['ra'] < ra_max)
+		else:
+			ra_mask = (tab['ra'] > ra_min) & (tab['ra'] < ra_max)
+
+		dec_mask = (tab['dec'] > dec_min) & (tab['dec'] < dec_max)
+		source_inds = np.where(ra_mask & dec_mask)[0]
+
 		if len(source_inds) > 0:
 			bj_sources.append(tab[source_inds])
 
-			if i == 0:
-				res2 = bj_sources[i]
+			if res2 is None:
+				res2 = bj_sources[-1]
 			else:
-				# if sources were found spanning multiple gaia files, we need to stitch them toghether
+				# if sources were found spanning multiple gaia files, stitch together
 				res2 = join(res2, tab[source_inds], join_type='outer')
-	res2.remove_columns(['ra', 'dec']) # do not want these, use ra/dec from main gaia query
-	return res2 
+
+	if res2 is not None:
+		res2.remove_columns(['ra', 'dec'])  # use ra/dec from main gaia query instead
+
+	return res2
 
 def load_epsf_fits(filepath):
 	"""
